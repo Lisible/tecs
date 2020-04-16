@@ -144,7 +144,30 @@ where
         self.index += 1;
         Some(Q::Iter::from(QueryResult(result)))
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let mut count = 0;
+        for i in 0..self.ecs.next_entity_id {
+            if self.component_type_ids.iter().all(|type_id| {
+                self.ecs.components.get(type_id).is_some()
+                    && self
+                        .ecs
+                        .components
+                        .get(type_id)
+                        .expect("Unknown component type")
+                        .get(i)
+                        .expect(format!("No component at index {}", self.index).as_str())
+                        .is_some()
+            }) {
+                count += 1;
+            }
+        }
+
+        (count, Some(count))
+    }
 }
+
+impl<'a, Q: Query<'a>> ExactSizeIterator for QueryIter<'a, Q> where Self: Sized {}
 
 pub trait Query<'a> {
     type Iter: From<QueryResult<'a>>;
@@ -156,50 +179,55 @@ pub trait Query<'a> {
 
 pub struct QueryResult<'a>(Vec<&'a Box<dyn Any>>);
 
-impl<'a, A: 'static, B: 'static> Query<'a> for (A, B) {
-    type Iter = (&'a A, &'a B);
+macro_rules! tuple_query_impl {
+    ($($idx:expr => $type:ident,)+) => {
+            impl<'a, $($type: 'static,)+> Query<'a> for ($($type,)+) {
+                type Iter = ($(&'a $type,)+);
 
-    fn iter(ecs: &'a Ecs) -> QueryIter<'a, Self> {
-        QueryIter {
-            index: 0,
-            component_type_ids: vec![TypeId::of::<A>(), TypeId::of::<B>()],
-            ecs,
-            query: PhantomData,
-        }
-    }
+                fn iter(ecs: &'a Ecs) -> QueryIter<'a, Self> {
+                    QueryIter {
+                        index: 0,
+                        component_type_ids: vec![$(TypeId::of::<$type>(),)+],
+                        ecs,
+                        query: PhantomData,
+                    }
+                }
+            }
+
+            impl<'a, $($type: 'static,)+> From<QueryResult<'a>> for ($(&'a $type,)+) {
+                fn from(result: QueryResult<'a>) -> Self {
+                    ($(result.0[$idx].downcast_ref().unwrap(),)*)
+                }
+            }
+    };
 }
 
-impl<'a, A: 'static, B: 'static> From<QueryResult<'a>> for (&'a A, &'a B) {
-    fn from(result: QueryResult<'a>) -> Self {
-        (
-            result.0[0].downcast_ref().unwrap(),
-            result.0[1].downcast_ref().unwrap(),
-        )
-    }
-}
-
-impl<'a, A: 'static, B: 'static, C: 'static> Query<'a> for (A, B, C) {
-    type Iter = (&'a A, &'a B, &'a C);
-
-    fn iter(ecs: &'a Ecs) -> QueryIter<'a, Self> {
-        QueryIter {
-            index: 0,
-            component_type_ids: vec![TypeId::of::<A>(), TypeId::of::<B>(), TypeId::of::<C>()],
-            ecs,
-            query: PhantomData,
-        }
-    }
-}
-
-impl<'a, A: 'static, B: 'static, C: 'static> From<QueryResult<'a>> for (&'a A, &'a B, &'a C) {
-    fn from(result: QueryResult<'a>) -> Self {
-        (
-            result.0[0].downcast_ref().unwrap(),
-            result.0[1].downcast_ref().unwrap(),
-            result.0[2].downcast_ref().unwrap(),
-        )
-    }
-}
+tuple_query_impl!(0 => A,);
+tuple_query_impl!(0 => A, 1 => B,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T, 20 => U,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T, 20 => U, 21 => V,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T, 20 => U, 21 => V, 22 => W,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T, 20 => U, 21 => V, 22 => W, 23 => X,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T, 20 => U, 21 => V, 22 => W, 23 => X, 24 => Y,);
+tuple_query_impl!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M, 13 => N, 14 => O, 15 => P, 16 => Q, 17 => R, 18 => S, 19 => T, 20 => U, 21 => V, 22 => W, 23 => X, 24 => Y, 25 => Z,);
 
 #[cfg(test)]
 mod tests {
@@ -221,6 +249,9 @@ mod tests {
     struct Health {
         pub health: f32,
     }
+
+    #[derive(Debug, PartialEq)]
+    struct Burnable;
 
     #[test]
     pub fn ecs_build_entity() {
@@ -281,11 +312,6 @@ mod tests {
             .with_component(Speed { x: 12.5, y: 80.0 })
             .build();
 
-        for (position, speed) in <(Position, Speed)>::iter(&mut ecs) {
-            println!("{:?}", position);
-            println!("{:?}", speed);
-        }
-
         assert_eq!(
             <(Position, Speed)>::iter(&ecs).nth(0),
             Some((&Position { x: 0.5, y: 2.3 }, &Speed { x: 1.0, y: 4.0 }))
@@ -326,5 +352,46 @@ mod tests {
         );
 
         assert_eq!(<(Position, Speed, Health)>::iter(&ecs).nth(1), None);
+        assert_eq!(<(Position, Speed, Health)>::iter(&ecs).len(), 1);
+        assert_eq!(<(Position, Health)>::iter(&ecs).len(), 2);
+    }
+
+    #[test]
+    pub fn query4() {
+        let mut ecs = Ecs::new();
+        ecs.new_entity()
+            .with_component(Position { x: 0.5, y: 2.3 })
+            .with_component(Speed { x: 1.0, y: 4.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 1.0, y: 2.3 })
+            .with_component(Speed { x: 12.0, y: 42.0 })
+            .with_component(Health { health: 100.0 })
+            .with_component(Burnable)
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 18.2, y: 4.5 })
+            .with_component(Speed { x: 122.0, y: 12.0 })
+            .with_component(Health { health: 95.0 })
+            .with_component(Burnable)
+            .build();
+
+        ecs.new_entity().with_component(Burnable).build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 0.5, y: 2.3 })
+            .with_component(Speed { x: 1.0, y: 4.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 18.54, y: 4.5 })
+            .with_component(Speed { x: 122.0, y: 12.0 })
+            .with_component(Health { health: 95.0 })
+            .with_component(Burnable)
+            .build();
+
+        assert_eq!(<(Position,)>::iter(&ecs).len(), 5);
     }
 }
