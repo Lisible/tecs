@@ -64,18 +64,14 @@ impl<'a> EntityBuilder<'a> {
         self.ecs.resize_component_stores();
         let id = self.ecs.next_entity_id;
         for component in self.components {
-            if let Some(storage) = self.ecs.components.get_mut(&(*component).type_id()) {
+            let type_id = (*component).type_id();
+            if let Some(storage) = self.ecs.components.get_mut(&type_id) {
                 storage[id] = Some(component);
             } else {
-                self.ecs
-                    .components
-                    .insert(((*component).type_id()).clone(), vec![]);
-                let storage = self
-                    .ecs
-                    .components
-                    .get_mut(&(*component).type_id())
-                    .expect("component storage");
-                storage.push(Some(component));
+                let mut storage = vec![];
+                storage.resize_with(id + 1, || None);
+                storage[id] = Some(component);
+                self.ecs.components.insert((&type_id).clone(), storage);
             }
         }
 
@@ -158,6 +154,8 @@ pub trait Query<'a> {
         Self: Sized;
 }
 
+pub struct QueryResult<'a>(Vec<&'a Box<dyn Any>>);
+
 impl<'a, A: 'static, B: 'static> Query<'a> for (A, B) {
     type Iter = (&'a A, &'a B);
 
@@ -171,13 +169,34 @@ impl<'a, A: 'static, B: 'static> Query<'a> for (A, B) {
     }
 }
 
-pub struct QueryResult<'a>(Vec<&'a Box<dyn Any>>);
-
 impl<'a, A: 'static, B: 'static> From<QueryResult<'a>> for (&'a A, &'a B) {
     fn from(result: QueryResult<'a>) -> Self {
         (
             result.0[0].downcast_ref().unwrap(),
             result.0[1].downcast_ref().unwrap(),
+        )
+    }
+}
+
+impl<'a, A: 'static, B: 'static, C: 'static> Query<'a> for (A, B, C) {
+    type Iter = (&'a A, &'a B, &'a C);
+
+    fn iter(ecs: &'a Ecs) -> QueryIter<'a, Self> {
+        QueryIter {
+            index: 0,
+            component_type_ids: vec![TypeId::of::<A>(), TypeId::of::<B>(), TypeId::of::<C>()],
+            ecs,
+            query: PhantomData,
+        }
+    }
+}
+
+impl<'a, A: 'static, B: 'static, C: 'static> From<QueryResult<'a>> for (&'a A, &'a B, &'a C) {
+    fn from(result: QueryResult<'a>) -> Self {
+        (
+            result.0[0].downcast_ref().unwrap(),
+            result.0[1].downcast_ref().unwrap(),
+            result.0[2].downcast_ref().unwrap(),
         )
     }
 }
@@ -276,5 +295,36 @@ mod tests {
             <(Position, Speed)>::iter(&ecs).nth(1),
             Some((&Position { x: 1.0, y: 2.3 }, &Speed { x: 12.5, y: 80.0 }))
         );
+    }
+
+    #[test]
+    pub fn query3() {
+        let mut ecs = Ecs::new();
+        ecs.new_entity()
+            .with_component(Position { x: 0.5, y: 2.3 })
+            .with_component(Speed { x: 1.0, y: 4.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 1.0, y: 2.3 })
+            .with_component(Health { health: 100.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 1.0, y: 2.3 })
+            .with_component(Speed { x: 12.5, y: 80.0 })
+            .with_component(Health { health: 95.0 })
+            .build();
+
+        assert_eq!(
+            <(Position, Speed, Health)>::iter(&ecs).nth(0),
+            Some((
+                &Position { x: 1.0, y: 2.3 },
+                &Speed { x: 12.5, y: 80.0 },
+                &Health { health: 95.0 }
+            ))
+        );
+
+        assert_eq!(<(Position, Speed, Health)>::iter(&ecs).nth(1), None);
     }
 }
