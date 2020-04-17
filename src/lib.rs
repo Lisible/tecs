@@ -7,12 +7,14 @@ type EntityId = usize;
 #[derive(Debug)]
 pub struct Ecs {
     next_entity_id: EntityId,
+    entity_free_list: Vec<EntityId>,
     components: HashMap<TypeId, Vec<Option<Box<dyn Any>>>>,
 }
 impl Ecs {
     pub fn new() -> Ecs {
         Ecs {
             next_entity_id: 0,
+            entity_free_list: vec![],
             components: HashMap::new(),
         }
     }
@@ -20,19 +22,39 @@ impl Ecs {
     pub fn new_entity(&mut self) -> EntityBuilder {
         EntityBuilder::new(self)
     }
-    pub fn component<T: 'static>(&self, index: usize) -> Option<&T> {
+    pub fn remove_entity(&mut self, entity_id: EntityId) {
+        for component in self.components.values_mut() {
+            component[entity_id] = None;
+        }
+
+        self.entity_free_list.push(entity_id);
+    }
+    pub fn component<T: 'static>(&self, entity_id: EntityId) -> Option<&T> {
         self.components
             .get(&TypeId::of::<T>())?
-            .get(index)?
+            .get(entity_id)?
             .as_ref()?
             .downcast_ref()
     }
-    pub fn component_mut<T: 'static>(&mut self, index: usize) -> Option<&mut T> {
+    pub fn component_mut<T: 'static>(&mut self, entity_id: EntityId) -> Option<&mut T> {
         self.components
             .get_mut(&TypeId::of::<T>())?
-            .get_mut(index)?
+            .get_mut(entity_id)?
             .as_mut()?
             .downcast_mut()
+    }
+
+    fn fetch_next_entity_id(&mut self) -> EntityId {
+        if self.entity_free_list.is_empty() {
+            let id = self.next_entity_id;
+            self.resize_component_stores();
+            self.next_entity_id += 1;
+            id
+        } else {
+            self.entity_free_list
+                .pop()
+                .expect("No entity id in freelist")
+        }
     }
 
     fn resize_component_stores(&mut self) {
@@ -61,8 +83,7 @@ impl<'a> EntityBuilder<'a> {
     }
 
     pub fn build(self) -> EntityId {
-        self.ecs.resize_component_stores();
-        let id = self.ecs.next_entity_id;
+        let id = self.ecs.fetch_next_entity_id();
         for component in self.components {
             let type_id = (*component).type_id();
             if let Some(storage) = self.ecs.components.get_mut(&type_id) {
@@ -75,7 +96,6 @@ impl<'a> EntityBuilder<'a> {
             }
         }
 
-        self.ecs.next_entity_id += 1;
         id
     }
 }
@@ -393,5 +413,49 @@ mod tests {
             .build();
 
         assert_eq!(<(Position,)>::iter(&ecs).len(), 5);
+    }
+
+    #[test]
+    pub fn ecs_remove_entity() {
+        let mut ecs = Ecs::new();
+        ecs.new_entity()
+            .with_component(Position { x: 0.5, y: 2.3 })
+            .with_component(Speed { x: 1.0, y: 4.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 1.0, y: 2.3 })
+            .with_component(Speed { x: 12.0, y: 42.0 })
+            .with_component(Health { health: 100.0 })
+            .with_component(Burnable)
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 18.2, y: 4.5 })
+            .with_component(Speed { x: 122.0, y: 12.0 })
+            .with_component(Health { health: 95.0 })
+            .with_component(Burnable)
+            .build();
+
+        ecs.remove_entity(1);
+        ecs.remove_entity(0);
+
+        assert_eq!(ecs.new_entity().build(), 0);
+        assert_eq!(
+            ecs.new_entity()
+                .with_component(Position { x: 15.0, y: 23.0 })
+                .build(),
+            1
+        );
+        assert_eq!(ecs.new_entity().build(), 3);
+
+        for &i in [0usize, 3].iter() {
+            assert!(ecs.component::<Position>(i).is_none());
+            assert!(ecs.component::<Speed>(i).is_none());
+            assert!(ecs.component::<Health>(i).is_none());
+            assert!(ecs.component::<Burnable>(i).is_none());
+        }
+
+        assert!(ecs.component::<Position>(1).is_some());
     }
 }
