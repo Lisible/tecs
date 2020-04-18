@@ -4,13 +4,16 @@ use std::marker::PhantomData;
 
 type EntityId = usize;
 
+/// Contains the entire Ecs state
 #[derive(Debug)]
 pub struct Ecs {
     next_entity_id: EntityId,
     entity_free_list: Vec<EntityId>,
     components: HashMap<TypeId, Vec<Option<Box<dyn Any>>>>,
 }
+
 impl Ecs {
+    /// Create an empty `Ecs`.
     pub fn new() -> Ecs {
         Ecs {
             next_entity_id: 0,
@@ -19,9 +22,68 @@ impl Ecs {
         }
     }
 
+    /// Create a new entity in the Ecs.
+    /// This function will return an `EntityBuilder`, the entity will be stored
+    /// as soon as `EntityBuilder::build` is called.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tecs::*;
+    ///
+    /// struct Position {
+    ///     x: f32,
+    ///     y: f32
+    /// }
+    ///
+    /// let mut ecs = Ecs::new();
+    /// let entity_id = ecs.new_entity()
+    ///     .with_component(Position { x: 1.0, y: 2.0 })
+    ///     .build();
+    ///
+    /// assert!(ecs.component::<Position>(0).is_some())
+    /// ```
     pub fn new_entity(&mut self) -> EntityBuilder {
         EntityBuilder::new(self)
     }
+
+    /// Remove an entity from the Ecs.
+    ///
+    /// This will set all the entity components to None and add the entity id
+    /// to the entity id free list for reuse of the id.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tecs::*;
+    ///
+    /// struct Position {
+    ///     x: f32,
+    ///     y: f32
+    /// }
+    ///
+    /// let mut ecs = Ecs::new();
+    /// let first_entity_id = ecs.new_entity()
+    ///     .with_component(Position { x: 1.0, y: 2.0 })
+    ///     .build();
+    /// let second_entity_id = ecs.new_entity()
+    ///     .with_component(Position { x: 3.0, y: 4.0 })
+    ///     .build();
+    ///
+    /// assert!(ecs.component::<Position>(first_entity_id).is_some());
+    /// assert!(ecs.component::<Position>(second_entity_id).is_some());
+    ///
+    /// ecs.remove_entity(first_entity_id);
+    ///
+    /// assert!(ecs.component::<Position>(first_entity_id).is_none());
+    /// assert!(ecs.component::<Position>(second_entity_id).is_some());
+    ///
+    /// let new_entity_id = ecs.new_entity()
+    ///     .with_component(Position { x: 5.0, y: 6.0 })
+    ///     .build();
+    ///
+    /// assert_eq!(new_entity_id, first_entity_id);
+    /// ```
     pub fn remove_entity(&mut self, entity_id: EntityId) {
         for component in self.components.values_mut() {
             component[entity_id] = None;
@@ -29,6 +91,27 @@ impl Ecs {
 
         self.entity_free_list.push(entity_id);
     }
+
+    /// Returns a reference to the component of an entity
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tecs::*;
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct Position {
+    ///     x: f32,
+    ///     y: f32
+    /// }
+    ///
+    /// let mut ecs = Ecs::new();
+    /// let entity = ecs.new_entity()
+    ///     .with_component(Position { x: 3.0, y: 4.5 })
+    ///     .build();
+    ///
+    /// assert_eq!(*ecs.component::<Position>(entity).unwrap(), Position { x: 3.0, y: 4.5 });
+    /// ```
     pub fn component<T: 'static>(&self, entity_id: EntityId) -> Option<&T> {
         self.components
             .get(&TypeId::of::<T>())?
@@ -36,6 +119,29 @@ impl Ecs {
             .as_ref()?
             .downcast_ref()
     }
+    /// Returns a mutable reference to the component of an entity
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tecs::*;
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct Position {
+    ///     x: f32,
+    ///     y: f32
+    /// }
+    ///
+    /// let mut ecs = Ecs::new();
+    /// let entity = ecs.new_entity()
+    ///     .with_component(Position { x: 3.0, y: 4.5 })
+    ///     .build();
+    ///
+    /// assert_eq!(*ecs.component::<Position>(entity).unwrap(), Position { x: 3.0, y: 4.5 });
+    ///
+    /// ecs.component_mut::<Position>(entity).unwrap().x = 200.0;
+    /// assert_eq!(*ecs.component::<Position>(entity).unwrap(), Position { x: 200.0, y: 4.5 });
+    /// ```
     pub fn component_mut<T: 'static>(&mut self, entity_id: EntityId) -> Option<&mut T> {
         self.components
             .get_mut(&TypeId::of::<T>())?
@@ -64,12 +170,14 @@ impl Ecs {
     }
 }
 
+/// Builds an entity with a given set of components
 pub struct EntityBuilder<'a> {
     ecs: &'a mut Ecs,
     components: Vec<Box<dyn Any>>,
 }
 
 impl<'a> EntityBuilder<'a> {
+    /// Create a new `EntityBuilder` for the given `Ecs`.
     pub fn new(ecs: &'a mut Ecs) -> Self {
         EntityBuilder {
             ecs,
@@ -77,11 +185,19 @@ impl<'a> EntityBuilder<'a> {
         }
     }
 
+    /// Add a component to the entity that is being created
     pub fn with_component(mut self, component: impl Any) -> Self {
         self.components.push(Box::new(component));
         self
     }
 
+    /// Build the entity with its component.
+    ///
+    /// This methods effectively stores the components into the components
+    /// storage. If no storage is available for a given component, it is
+    /// created.
+    ///
+    /// Returns the id of the newly created entity.
     pub fn build(self) -> EntityId {
         let id = self.ecs.fetch_next_entity_id();
         for component in self.components {
