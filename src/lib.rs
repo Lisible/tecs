@@ -216,21 +216,6 @@ impl<'a> EntityBuilder<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Entity {
-    identifier: usize,
-}
-
-impl Entity {
-    pub fn new(identifier: usize) -> Entity {
-        Entity { identifier }
-    }
-
-    pub fn identifier(&self) -> usize {
-        self.identifier
-    }
-}
-
 pub struct QueryIter<'a, Q> {
     index: usize,
     component_type_ids: Vec<TypeId>,
