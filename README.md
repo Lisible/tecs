@@ -1,4 +1,4 @@
-#tecs
+# tecs
 TeaECS is a simple Rust ECS. I'm building this project for learning purposes. 
 
 This project doesn't have the ambition to be as good or better than popular ECS libraries 
@@ -11,9 +11,9 @@ tecs doesn't provide parallel processing features.
 * [Using tecs](#using-tecs)
 * [Contributing](#contributing)
 
-##Using tecs
+## Using tecs
 
-###Creating entities
+### Creating entities
 
 ```rust
 let mut ecs = Ecs::new();
@@ -23,13 +23,13 @@ let entity_id = ecs.new_entity()
     .build();
 ```
 
-###Removing entities
+### Removing entities
 
 ```rust
 ecs.remove_entity(1);
 ```
 
-###Querying the Ecs
+### Querying the Ecs
 
 ```rust
 let mut ecs = Ecs::new();
@@ -47,5 +47,5 @@ for (position, speed) in <(Position, Speed)>.iter(&mut ecs) {
 }
 ```
 
-##Contributing
+## Contributing
 Feel free to create issues and pull requests to the project.
