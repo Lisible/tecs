@@ -335,30 +335,6 @@ impl<'a, T: 'static> QueryParameter<'a> for Imm<T> {
     }
 }
 
-impl<'a, A: QueryParameter<'a>, B: QueryParameter<'a>> IntoQuery<'a> for (A, B) {
-    fn query() -> Query<'a, Self> {
-        Query {
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<'a, A: QueryParameter<'a>, B: QueryParameter<'a>> QueryParameter<'a> for (A, B) {
-    type Item = (A::Item, B::Item);
-
-    fn type_ids() -> Vec<TypeId> {
-        A::type_ids()
-            .iter()
-            .chain(B::type_ids().iter())
-            .map(|&x| x)
-            .collect()
-    }
-
-    unsafe fn fetch(index: usize, ecs: *mut Ecs) -> Self::Item {
-        (A::fetch(index, ecs), B::fetch(index, ecs))
-    }
-}
-
 macro_rules! tuple_query_impl {
     ($head:ident, $($tail:ident,)*) => {
         impl <'a, $head:QueryParameter<'a>, $($tail: QueryParameter<'a>,)*> IntoQuery<'a> for ($head, $($tail,)*) {
@@ -385,7 +361,16 @@ macro_rules! tuple_query_impl {
 }
 
 tuple_query_impl!(A,);
+tuple_query_impl!(A, B,);
 tuple_query_impl!(A, B, C,);
+tuple_query_impl!(A, B, C, D,);
+tuple_query_impl!(A, B, C, D, E,);
+tuple_query_impl!(A, B, C, D, E, F,);
+tuple_query_impl!(A, B, C, D, E, F, G,);
+tuple_query_impl!(A, B, C, D, E, F, G, H,);
+tuple_query_impl!(A, B, C, D, E, F, G, H, I,);
+tuple_query_impl!(A, B, C, D, E, F, G, H, I, J,);
+tuple_query_impl!(A, B, C, D, E, F, G, H, I, J, K,);
 
 pub struct QueryIter<Q> {
     index: usize,
