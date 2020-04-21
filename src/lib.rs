@@ -335,6 +335,19 @@ impl<'a, T: 'static> QueryParameter<'a> for Imm<T> {
     }
 }
 
+pub struct System<'a, P: QueryParameter<'a>> {
+    query: Query<'a, P>,
+    function: Box<dyn FnMut(P::Item)>,
+}
+
+impl<'a, P: QueryParameter<'a>> System<'a, P> {
+    pub fn run(&mut self, ecs: &'a mut Ecs) {
+        for p in self.query.iter(ecs) {
+            (self.function)(p);
+        }
+    }
+}
+
 macro_rules! tuple_query_impl {
     ($head:ident, $($tail:ident,)*) => {
         impl <'a, $head:QueryParameter<'a>, $($tail: QueryParameter<'a>,)*> IntoQuery<'a> for ($head, $($tail,)*) {
@@ -730,5 +743,48 @@ mod tests {
         }
 
         assert!(ecs.component::<Position>(1).is_some());
+    }
+
+    #[test]
+    pub fn system_run() {
+        let mut ecs = Ecs::new();
+        ecs.new_entity()
+            .with_component(Position { x: 0.5, y: 2.3 })
+            .with_component(Speed { x: 1.0, y: 4.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Speed { x: 12.0, y: 42.0 })
+            .with_component(Health { health: 100.0 })
+            .with_component(Burnable)
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 18.2, y: 4.5 })
+            .with_component(Speed { x: 122.0, y: 12.0 })
+            .with_component(Health { health: 95.0 })
+            .with_component(Burnable)
+            .build();
+
+        {
+            let mut teleport_to_origin_system = System {
+                query: <(Mut<Position>,)>::query(),
+                function: Box::new(|(position,)| {
+                    position.x = 0.0;
+                    position.y = 0.0;
+                }),
+            };
+            teleport_to_origin_system.run(&mut ecs);
+        }
+
+        assert_eq!(
+            *ecs.component::<Position>(0).unwrap(),
+            Position { x: 0.0, y: 0.0 }
+        );
+
+        assert_eq!(
+            *ecs.component::<Position>(2).unwrap(),
+            Position { x: 0.0, y: 0.0 }
+        );
     }
 }
