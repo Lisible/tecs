@@ -151,24 +151,22 @@ impl Ecs {
             .downcast_mut()
     }
 
-    pub fn component_iter<T: 'static>(&mut self) -> ComponentIter<T> {
+    pub fn component_iter<T: 'static>(&mut self) -> ComponentIter<'_, T> {
         ComponentIter::new(self)
     }
 
-    pub fn component_iter_mut<T: 'static>(&mut self) -> ComponentIterMut<T> {
+    pub fn component_iter_mut<T: 'static>(&mut self) -> ComponentIterMut<'_, T> {
         ComponentIterMut::new(self)
     }
 
     fn fetch_next_entity_id(&mut self) -> EntityId {
-        if self.entity_free_list.is_empty() {
+        if let Some(id) = self.entity_free_list.pop() {
+            id
+        } else {
             let id = self.next_entity_id;
             self.resize_component_stores();
             self.next_entity_id += 1;
             id
-        } else {
-            self.entity_free_list
-                .pop()
-                .expect("No entity id in freelist")
         }
     }
 
@@ -215,12 +213,7 @@ impl<'a, T: 'static> Iterator for ComponentIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut component = self.iterator.next()?;
-        while component.is_none() {
-            component = self.iterator.next()?;
-        }
-
-        component.as_ref().unwrap().downcast_ref()
+        self.iterator.find_map(|x| x.as_ref())?.downcast_ref()
     }
 }
 
@@ -228,12 +221,7 @@ impl<'a, T: 'static> Iterator for ComponentIterMut<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut component = self.iterator.next()?;
-        while component.is_none() {
-            component = self.iterator.next()?;
-        }
-
-        component.as_mut().unwrap().downcast_mut()
+        self.iterator.find_map(|x| x.as_mut())?.downcast_mut()
     }
 }
 
@@ -385,36 +373,35 @@ tuple_query_impl!(A, B, C, D, E, F, G, H, I,);
 tuple_query_impl!(A, B, C, D, E, F, G, H, I, J,);
 tuple_query_impl!(A, B, C, D, E, F, G, H, I, J, K,);
 
-pub struct QueryIter<Q> {
+pub struct QueryIter<'a, Q> {
     index: usize,
-    ecs: *mut Ecs,
+    ecs: &'a mut Ecs,
     phantom: PhantomData<Q>,
 }
 
-impl<'a, P: QueryParameter<'a>> Iterator for QueryIter<Query<'a, P>> {
+impl<'a, P: QueryParameter<'a>> Iterator for QueryIter<'_, Query<'a, P>> {
     type Item = P::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= unsafe { (*self.ecs).next_entity_id } {
+        if self.index >= self.ecs.next_entity_id {
             return None;
         }
 
         let component_type_ids = P::type_ids();
-        unsafe {
-            while component_type_ids.iter().any(|type_id| {
-                !(*self.ecs).components.contains_key(type_id)
-                    || (*self.ecs)
-                        .components
-                        .get(type_id)
-                        .expect("Unknown component type")
-                        .get(self.index)
-                        .expect(format!("No component at index {}", self.index).as_str())
-                        .is_none()
-            }) {
-                self.index += 1;
-                if self.index >= (*self.ecs).next_entity_id {
-                    return None;
-                }
+        while component_type_ids.iter().any(|type_id| {
+            !self.ecs.components.contains_key(type_id)
+                || self
+                    .ecs
+                    .components
+                    .get(type_id)
+                    .expect("Unknown component type")
+                    .get(self.index)
+                    .expect(format!("No component at index {}", self.index).as_str())
+                    .is_none()
+        }) {
+            self.index += 1;
+            if self.index >= self.ecs.next_entity_id {
+                return None;
             }
         }
 
@@ -422,32 +409,7 @@ impl<'a, P: QueryParameter<'a>> Iterator for QueryIter<Query<'a, P>> {
         self.index += 1;
         return Some(result);
     }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let mut count = 0;
-        let component_type_ids = P::type_ids();
-        unsafe {
-            for i in 0..(*self.ecs).next_entity_id {
-                if component_type_ids.iter().all(|type_id| {
-                    (*self.ecs).components.get(type_id).is_some()
-                        && (*self.ecs)
-                            .components
-                            .get(type_id)
-                            .expect("Unknown component type")
-                            .get(i)
-                            .expect(format!("No component at index {}", self.index).as_str())
-                            .is_some()
-                }) {
-                    count += 1;
-                }
-            }
-        }
-
-        (count, Some(count))
-    }
 }
-
-impl<'a, P: QueryParameter<'a>> ExactSizeIterator for QueryIter<Query<'a, P>> where Self: Sized {}
 
 #[cfg(test)]
 mod tests {
@@ -692,11 +654,13 @@ mod tests {
         assert_eq!(
             <(Imm<Position>, Imm<Speed>, Imm<Health>)>::query()
                 .iter(&mut ecs)
-                .len(),
+                .count(),
             1
         );
         assert_eq!(
-            <(Imm<Position>, Imm<Health>)>::query().iter(&mut ecs).len(),
+            <(Imm<Position>, Imm<Health>)>::query()
+                .iter(&mut ecs)
+                .count(),
             2
         );
     }
