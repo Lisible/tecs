@@ -296,6 +296,9 @@ pub trait IntoQuery<'a> {
 pub trait QueryParameter<'a> {
     type Item: 'a;
     fn type_ids() -> Vec<TypeId>;
+
+    /// Fetches the parameter from an Ecs
+    /// The Ecs must be a valid instance and there should be a matching item for the given entity
     unsafe fn fetch(index: usize, ecs: *mut Ecs) -> Self::Item;
 }
 
