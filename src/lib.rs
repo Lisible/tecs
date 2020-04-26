@@ -271,8 +271,8 @@ impl<'a> EntityBuilder<'a> {
     }
 }
 
-struct Mut<T>(PhantomData<T>);
-struct Imm<T>(PhantomData<T>);
+pub struct Mut<T>(PhantomData<T>);
+pub struct Imm<T>(PhantomData<T>);
 
 pub struct Query<'a, P: QueryParameter<'a>> {
     phantom: PhantomData<&'a P>,
