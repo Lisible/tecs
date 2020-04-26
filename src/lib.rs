@@ -331,6 +331,15 @@ pub struct System<'a, P: QueryParameter<'a>> {
     function: Box<dyn FnMut(P::Item)>,
 }
 
+impl<'a, P> System<'a, P>
+where
+    P: QueryParameter<'a>,
+{
+    pub fn new(query: Query<'a, P>, function: Box<dyn FnMut(P::Item)>) -> System<'a, P> {
+        System { query, function }
+    }
+}
+
 impl<'a, P: QueryParameter<'a>> System<'a, P> {
     pub fn run(&mut self, ecs: &'a mut Ecs) {
         for p in self.query.iter(ecs) {
