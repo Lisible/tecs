@@ -6,7 +6,6 @@ use std::slice::{Iter, IterMut};
 type EntityId = usize;
 
 /// Contains the entire Ecs state
-#[derive(Debug)]
 pub struct Ecs {
     next_entity_id: EntityId,
     entity_free_list: Vec<EntityId>,
@@ -274,154 +273,67 @@ impl<'a> EntityBuilder<'a> {
 pub struct Mut<T>(PhantomData<T>);
 pub struct Imm<T>(PhantomData<T>);
 
-pub struct Query<'a, P: QueryParameter<'a>> {
-    phantom: PhantomData<&'a P>,
+pub trait Queryable<'a> {
+    type QueryableDataType: 'a;
+    fn query() -> Query<Self>
+        where Self: Sized;
 }
-impl<'a, P: QueryParameter<'a>> Query<'a, P> {
-    pub fn iter(&self, ecs: &'a mut Ecs) -> QueryIter<Self> {
-        QueryIter {
-            index: 0,
-            ecs,
-            phantom: PhantomData,
+
+impl<'a, T: 'static> Queryable<'a> for Mut<T> {
+    type QueryableDataType = &'a mut T;
+    fn query() -> Query<Self> {
+        Query {
+            phantom: PhantomData
         }
     }
 }
 
-pub trait IntoQuery<'a> {
-    fn query() -> Query<'a, Self>
-    where
-        Self: QueryParameter<'a> + Sized;
-}
-
-pub trait QueryParameter<'a> {
-    type Item: 'a;
-    fn type_ids() -> Vec<TypeId>;
-
-    /// Fetches the parameter from an Ecs
-    /// The Ecs must be a valid instance and there should be a matching item for the given entity
-    unsafe fn fetch(index: usize, ecs: *mut Ecs) -> Self::Item;
-}
-
-impl<'a, T: 'static> QueryParameter<'a> for Mut<T> {
-    type Item = &'a mut T;
-
-    fn type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<T>()]
-    }
-
-    unsafe fn fetch(index: usize, ecs: *mut Ecs) -> Self::Item {
-        (*ecs).component_mut::<T>(index).unwrap()
-    }
-}
-
-impl<'a, T: 'static> QueryParameter<'a> for Imm<T> {
-    type Item = &'a T;
-
-    fn type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<T>()]
-    }
-
-    unsafe fn fetch(index: usize, ecs: *mut Ecs) -> Self::Item {
-        (*ecs).component::<T>(index).unwrap()
-    }
-}
-
-pub struct System<'a, P: QueryParameter<'a>> {
-    query: Query<'a, P>,
-    function: Box<dyn FnMut(P::Item)>,
-}
-
-impl<'a, P> System<'a, P>
-where
-    P: QueryParameter<'a>,
-{
-    pub fn new(query: Query<'a, P>, function: Box<dyn FnMut(P::Item)>) -> System<'a, P> {
-        System { query, function }
-    }
-}
-
-impl<'a, P: QueryParameter<'a>> System<'a, P> {
-    pub fn run(&mut self, ecs: &'a mut Ecs) {
-        for p in self.query.iter(ecs) {
-            (self.function)(p);
+impl<'a, T: 'static> Queryable<'a> for Imm<T> {
+    type QueryableDataType = &'a T;
+    fn query() -> Query<Self> {
+        Query {
+            phantom: PhantomData
         }
     }
 }
 
-macro_rules! tuple_query_impl {
-    ($head:ident, $($tail:ident,)*) => {
-        impl <'a, $head:QueryParameter<'a>, $($tail: QueryParameter<'a>,)*> IntoQuery<'a> for ($head, $($tail,)*) {
-            fn query() -> Query<'a, Self> {
-                Query {
-                    phantom: PhantomData
-                }
-            }
-        }
-
-        impl<'a, $head: QueryParameter<'a>, $($tail: QueryParameter<'a>,)*> QueryParameter<'a> for ($head, $($tail,)*) {
-            type Item = ($head::Item, $($tail::Item,)*);
-
-            fn type_ids() -> Vec<TypeId> {
-                $head::type_ids().iter()$(.chain($tail::type_ids().iter()))*.map(|&x| x).collect()
-            }
-
-            unsafe fn fetch(index: usize, ecs: *mut Ecs) -> Self::Item {
-                ($head::fetch(index, ecs), $($tail::fetch(index, ecs),)*)
-            }
-
+impl<'a, A: Queryable<'a>, B: Queryable<'a>> Queryable<'a> for (A, B) {
+    type QueryableDataType = (A::QueryableDataType, B::QueryableDataType);
+    fn query() -> Query<Self> {
+        Query {
+            phantom: PhantomData
         }
     }
 }
 
-tuple_query_impl!(A,);
-tuple_query_impl!(A, B,);
-tuple_query_impl!(A, B, C,);
-tuple_query_impl!(A, B, C, D,);
-tuple_query_impl!(A, B, C, D, E,);
-tuple_query_impl!(A, B, C, D, E, F,);
-tuple_query_impl!(A, B, C, D, E, F, G,);
-tuple_query_impl!(A, B, C, D, E, F, G, H,);
-tuple_query_impl!(A, B, C, D, E, F, G, H, I,);
-tuple_query_impl!(A, B, C, D, E, F, G, H, I, J,);
-tuple_query_impl!(A, B, C, D, E, F, G, H, I, J, K,);
-
-pub struct QueryIter<'a, Q> {
-    index: usize,
-    ecs: &'a mut Ecs,
-    phantom: PhantomData<Q>,
+pub struct Query<QD> {
+    phantom: PhantomData<QD>
 }
 
-impl<'a, P: QueryParameter<'a>> Iterator for QueryIter<'_, Query<'a, P>> {
-    type Item = P::Item;
+impl<'data, QD: for<'a> Queryable<'a>> Query<QD> {
+    pub fn iter(&mut self, ecs: &'data mut Ecs) -> QueryIterator<'data, QD> {
+        QueryIterator {
+           ecs,
+           phantom: PhantomData
+        }
+    }
+}
+
+pub struct QueryIterator<'data, QD> 
+where QD: for<'a> Queryable<'a> {
+    ecs: &'data mut Ecs,
+    phantom: PhantomData<QD>
+}
+
+impl<'data, QD: for<'a> Queryable<'a>> Iterator for QueryIterator<'data, QD> {
+    type Item = <QD as Queryable<'data>>::QueryableDataType;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.ecs.next_entity_id {
-            return None;
-        }
-
-        let component_type_ids = P::type_ids();
-        while component_type_ids.iter().any(|type_id| {
-            !self.ecs.components.contains_key(type_id)
-                || self
-                    .ecs
-                    .components
-                    .get(type_id)
-                    .expect("Unknown component type")
-                    .get(self.index)
-                    .expect(format!("No component at index {}", self.index).as_str())
-                    .is_none()
-        }) {
-            self.index += 1;
-            if self.index >= self.ecs.next_entity_id {
-                return None;
-            }
-        }
-
-        let result = unsafe { P::fetch(self.index, self.ecs) };
-        self.index += 1;
-        return Some(result);
+        None
     }
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -560,8 +472,9 @@ mod tests {
     }
 
     #[test]
-    pub fn query() {
+    pub fn ecs_query() {
         let mut ecs = Ecs::new();
+        
         ecs.new_entity()
             .with_component(Position { x: 0.5, y: 2.3 })
             .with_component(Speed { x: 1.0, y: 4.0 })
@@ -569,112 +482,22 @@ mod tests {
 
         ecs.new_entity()
             .with_component(Position { x: 1.0, y: 2.3 })
-            .build();
-
-        ecs.new_entity()
-            .with_component(Position { x: 1.0, y: 2.3 })
-            .with_component(Speed { x: 12.5, y: 80.0 })
-            .build();
-
-        assert_eq!(
-            <(Imm<Position>, Imm<Speed>)>::query().iter(&mut ecs).nth(0),
-            Some((&Position { x: 0.5, y: 2.3 }, &Speed { x: 1.0, y: 4.0 }))
-        );
-
-        assert_eq!(
-            <(Imm<Position>, Imm<Speed>)>::query().iter(&mut ecs).nth(1),
-            Some((&Position { x: 1.0, y: 2.3 }, &Speed { x: 12.5, y: 80.0 }))
-        );
-    }
-
-    #[test]
-    pub fn query2() {
-        let mut ecs = Ecs::new();
-        ecs.new_entity()
-            .with_component(Position { x: 0.5, y: 2.3 })
-            .with_component(Speed { x: 1.0, y: 2.0 })
-            .build();
-
-        ecs.new_entity()
-            .with_component(Position { x: 0.0, y: 2.0 })
-            .with_component(Health { health: 15.0 })
-            .build();
-
-        ecs.new_entity()
-            .with_component(Position { x: 0.5, y: 2.3 })
-            .with_component(Speed { x: 0.5, y: 1.3 })
-            .with_component(Health { health: 12.0 })
-            .build();
-
-        for (position, speed) in <(Mut<Position>, Imm<Speed>)>::query().iter(&mut ecs) {
-            position.x += speed.x;
-            position.y += speed.y;
-        }
-
-        assert_eq!(
-            <(Imm<Position>,)>::query().iter(&mut ecs).nth(0).unwrap().0,
-            &Position { x: 1.5, y: 4.3 }
-        );
-
-        assert_eq!(
-            <(Imm<Position>,)>::query().iter(&mut ecs).nth(1).unwrap().0,
-            &Position { x: 0.0, y: 2.0 }
-        );
-
-        assert_eq!(
-            <(Imm<Position>,)>::query().iter(&mut ecs).nth(2).unwrap().0,
-            &Position { x: 1.0, y: 3.6 }
-        );
-    }
-
-    #[test]
-    pub fn query3() {
-        let mut ecs = Ecs::new();
-        ecs.new_entity()
-            .with_component(Position { x: 0.5, y: 2.3 })
-            .with_component(Speed { x: 1.0, y: 4.0 })
-            .build();
-
-        ecs.new_entity()
-            .with_component(Position { x: 1.0, y: 2.3 })
+            .with_component(Speed { x: 12.0, y: 42.0 })
             .with_component(Health { health: 100.0 })
+            .with_component(Burnable)
             .build();
 
         ecs.new_entity()
-            .with_component(Position { x: 1.0, y: 2.3 })
-            .with_component(Speed { x: 12.5, y: 80.0 })
+            .with_component(Position { x: 18.2, y: 4.5 })
+            .with_component(Speed { x: 122.0, y: 12.0 })
             .with_component(Health { health: 95.0 })
+            .with_component(Burnable)
             .build();
-
-        assert_eq!(
-            <(Imm<Position>, Imm<Speed>, Imm<Health>)>::query()
-                .iter(&mut ecs)
-                .nth(0),
-            Some((
-                &Position { x: 1.0, y: 2.3 },
-                &Speed { x: 12.5, y: 80.0 },
-                &Health { health: 95.0 }
-            ))
-        );
-
-        assert_eq!(
-            <(Imm<Position>, Imm<Speed>, Imm<Health>)>::query()
-                .iter(&mut ecs)
-                .nth(1),
-            None
-        );
-        assert_eq!(
-            <(Imm<Position>, Imm<Speed>, Imm<Health>)>::query()
-                .iter(&mut ecs)
-                .count(),
-            1
-        );
-        assert_eq!(
-            <(Imm<Position>, Imm<Health>)>::query()
-                .iter(&mut ecs)
-                .count(),
-            2
-        );
+        
+        for (position, health) in <(Mut<Position>, Imm<Health>)>::query().iter(&mut ecs) {
+            println!("{:?}", position);
+            println!("{:?}", health);
+        }
     }
 
     #[test]
@@ -719,48 +542,5 @@ mod tests {
         }
 
         assert!(ecs.component::<Position>(1).is_some());
-    }
-
-    #[test]
-    pub fn system_run() {
-        let mut ecs = Ecs::new();
-        ecs.new_entity()
-            .with_component(Position { x: 0.5, y: 2.3 })
-            .with_component(Speed { x: 1.0, y: 4.0 })
-            .build();
-
-        ecs.new_entity()
-            .with_component(Speed { x: 12.0, y: 42.0 })
-            .with_component(Health { health: 100.0 })
-            .with_component(Burnable)
-            .build();
-
-        ecs.new_entity()
-            .with_component(Position { x: 18.2, y: 4.5 })
-            .with_component(Speed { x: 122.0, y: 12.0 })
-            .with_component(Health { health: 95.0 })
-            .with_component(Burnable)
-            .build();
-
-        {
-            let mut teleport_to_origin_system = System {
-                query: <(Mut<Position>,)>::query(),
-                function: Box::new(|(position,)| {
-                    position.x = 0.0;
-                    position.y = 0.0;
-                }),
-            };
-            teleport_to_origin_system.run(&mut ecs);
-        }
-
-        assert_eq!(
-            *ecs.component::<Position>(0).unwrap(),
-            Position { x: 0.0, y: 0.0 }
-        );
-
-        assert_eq!(
-            *ecs.component::<Position>(2).unwrap(),
-            Position { x: 0.0, y: 0.0 }
-        );
     }
 }
