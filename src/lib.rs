@@ -1,3 +1,4 @@
+use itertools::{multizip, Zip};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -274,66 +275,47 @@ pub struct Mut<T>(PhantomData<T>);
 pub struct Imm<T>(PhantomData<T>);
 
 pub trait Queryable<'a> {
-    type QueryableDataType: 'a;
-    fn query() -> Query<Self>
-        where Self: Sized;
+    type Iter: Iterator + 'a;
+
+    fn fetch(ecs: *mut Ecs) -> Self::Iter;
 }
 
 impl<'a, T: 'static> Queryable<'a> for Mut<T> {
-    type QueryableDataType = &'a mut T;
-    fn query() -> Query<Self> {
-        Query {
-            phantom: PhantomData
-        }
+    type Iter = ComponentIterMut<'a, T>;
+
+    fn fetch(ecs: *mut Ecs) -> Self::Iter {
+        unsafe { ecs.as_mut().unwrap().component_iter_mut::<T>() }
     }
 }
 
 impl<'a, T: 'static> Queryable<'a> for Imm<T> {
-    type QueryableDataType = &'a T;
-    fn query() -> Query<Self> {
-        Query {
-            phantom: PhantomData
+    type Iter = ComponentIter<'a, T>;
+
+    fn fetch(ecs: *mut Ecs) -> Self::Iter {
+        unsafe { ecs.as_mut().unwrap().component_iter::<T>() }
+    }
+}
+
+macro_rules! tuple_queryable_impl {
+    ($($ty:ident,)*) => {
+        impl<'a, $($ty: Queryable<'a>,)*> Queryable<'a> for ($($ty,)*) {
+            type Iter = Zip<($($ty::Iter,)*)>;
+
+            fn fetch(ecs: *mut Ecs) -> Self::Iter {
+                multizip(($($ty::fetch(ecs),)*))
+            }
         }
-    }
+    };
 }
 
-impl<'a, A: Queryable<'a>, B: Queryable<'a>> Queryable<'a> for (A, B) {
-    type QueryableDataType = (A::QueryableDataType, B::QueryableDataType);
-    fn query() -> Query<Self> {
-        Query {
-            phantom: PhantomData
-        }
-    }
-}
-
-pub struct Query<QD> {
-    phantom: PhantomData<QD>
-}
-
-impl<'data, QD: for<'a> Queryable<'a>> Query<QD> {
-    pub fn iter(&mut self, ecs: &'data mut Ecs) -> QueryIterator<'data, QD> {
-        QueryIterator {
-           ecs,
-           phantom: PhantomData
-        }
-    }
-}
-
-pub struct QueryIterator<'data, QD> 
-where QD: for<'a> Queryable<'a> {
-    ecs: &'data mut Ecs,
-    phantom: PhantomData<QD>
-}
-
-impl<'data, QD: for<'a> Queryable<'a>> Iterator for QueryIterator<'data, QD> {
-    type Item = <QD as Queryable<'data>>::QueryableDataType;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        None
-    }
-}
-
-
+tuple_queryable_impl!(A,);
+tuple_queryable_impl!(A, B,);
+tuple_queryable_impl!(A, B, C,);
+tuple_queryable_impl!(A, B, C, D,);
+tuple_queryable_impl!(A, B, C, D, E,);
+tuple_queryable_impl!(A, B, C, D, E, F,);
+tuple_queryable_impl!(A, B, C, D, E, F, G,);
+tuple_queryable_impl!(A, B, C, D, E, F, G, H,);
 
 #[cfg(test)]
 mod tests {
@@ -474,7 +456,7 @@ mod tests {
     #[test]
     pub fn ecs_query() {
         let mut ecs = Ecs::new();
-        
+
         ecs.new_entity()
             .with_component(Position { x: 0.5, y: 2.3 })
             .with_component(Speed { x: 1.0, y: 4.0 })
@@ -493,8 +475,8 @@ mod tests {
             .with_component(Health { health: 95.0 })
             .with_component(Burnable)
             .build();
-        
-        for (position, health) in <(Mut<Position>, Imm<Health>)>::query().iter(&mut ecs) {
+
+        for (position, health) in <(Mut<Position>, Imm<Health>)>::fetch(&mut ecs) {
             println!("{:?}", position);
             println!("{:?}", health);
         }
