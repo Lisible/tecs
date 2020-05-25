@@ -42,7 +42,7 @@ ecs.new_entity()
     .with_component(Speed { x: 0.5, y: 0.1 })
     .build();
 
-for (position, speed) in <(Mut<Position>, Imm<Speed>)>::query().iter(&mut ecs) {
+for (position, speed) in <(Mut<Position>, Imm<Speed>)>::iter(&mut ecs) {
     position.x += speed.x;
     position.y += speed.y;
 }
