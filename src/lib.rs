@@ -151,10 +151,70 @@ impl Ecs {
             .downcast_mut()
     }
 
+    /// Returns an iterator for the given component
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tecs::*;
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct Position {
+    ///     x: f32,
+    ///     y: f32
+    /// }
+    ///
+    /// let mut ecs = Ecs::new();
+    /// ecs.new_entity()
+    ///     .with_component(Position { x: 1.0, y: 2.0 })
+    ///     .build();
+    ///
+    /// ecs.new_entity()
+    ///     .with_component(Position { x: 3.0, y: 4.0 })
+    ///     .build();
+    ///
+    /// ecs.new_entity()
+    ///     .with_component(Position { x: 5.0, y: 6.0 })
+    ///     .build();
+    ///
+    /// let component_iterator = ecs.component_iter::<Position>();
+    /// assert_eq!(component_iterator.count(), 3);
+    ///
+    /// ```
     pub fn component_iter<T: 'static>(&mut self) -> ComponentIter<'_, T> {
         ComponentIter::new(self)
     }
 
+    /// Returns a mutable iterator for the given component
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tecs::*;
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct Position {
+    ///     x: f32,
+    ///     y: f32
+    /// }
+    ///
+    /// let mut ecs = Ecs::new();
+    /// ecs.new_entity()
+    ///     .with_component(Position { x: 1.0, y: 2.0 })
+    ///     .build();
+    ///
+    /// ecs.new_entity()
+    ///     .with_component(Position { x: 3.0, y: 4.0 })
+    ///     .build();
+    ///
+    /// ecs.new_entity()
+    ///     .with_component(Position { x: 5.0, y: 6.0 })
+    ///     .build();
+    ///
+    /// let component_iterator = ecs.component_iter_mut::<Position>();
+    /// assert_eq!(component_iterator.count(), 3);
+    ///
+    /// ```
     pub fn component_iter_mut<T: 'static>(&mut self) -> ComponentIterMut<'_, T> {
         ComponentIterMut::new(self)
     }
