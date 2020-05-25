@@ -476,10 +476,17 @@ mod tests {
             .with_component(Burnable)
             .build();
 
-        for (position, health) in <(Mut<Position>, Imm<Health>)>::fetch(&mut ecs) {
-            println!("{:?}", position);
-            println!("{:?}", health);
-        }
+        assert_eq!(<(Mut<Position>, Imm<Speed>)>::fetch(&mut ecs).count(), 3);
+        assert_eq!(<(Mut<Position>, Imm<Health>)>::fetch(&mut ecs).count(), 2);
+        assert_eq!(
+            <(Mut<Position>, Imm<Health>, Imm<Burnable>)>::fetch(&mut ecs).count(),
+            2
+        );
+
+        assert_eq!(
+            <(Mut<Position>, Imm<Speed>)>::fetch(&mut ecs).next(),
+            Some((&mut Position { x: 0.5, y: 2.3 }, &Speed { x: 1.0, y: 4.0 }))
+        );
     }
 
     #[test]
