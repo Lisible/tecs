@@ -331,7 +331,9 @@ impl<'a> EntityBuilder<'a> {
     }
 }
 
+/// Mutable accessor for components
 pub struct Mut<T>(PhantomData<T>);
+/// Immutable accessor for components
 pub struct Imm<T>(PhantomData<T>);
 
 pub trait Queryable<'a> {
@@ -377,6 +379,7 @@ tuple_queryable_impl!(A, B, C, D, E, F,);
 tuple_queryable_impl!(A, B, C, D, E, F, G,);
 tuple_queryable_impl!(A, B, C, D, E, F, G, H,);
 
+/// A System for a specific query
 pub struct System<'a, Q: Queryable<'a>> {
     query: PhantomData<Q>,
     function: Box<dyn FnMut(<<Q as Queryable<'a>>::Iter as Iterator>::Item)>,
@@ -405,11 +408,13 @@ pub trait Runnable {
     fn run(&mut self, ecs: &mut Ecs);
 }
 
+/// Holds a system list and runs them on an Ecs
 pub struct SystemSchedule {
     systems: Vec<Box<dyn Runnable>>,
 }
 
 impl SystemSchedule {
+    /// Runs the schedule
     pub fn run(&mut self, ecs: &mut Ecs) {
         for system in &mut self.systems {
             system.run(ecs);
