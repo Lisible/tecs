@@ -382,6 +382,17 @@ pub struct System<'a, Q: Queryable<'a>> {
     function: Box<dyn FnMut(<<Q as Queryable<'a>>::Iter as Iterator>::Item)>,
 }
 
+impl<'a, Q: Queryable<'a>> System<'a, Q> {
+    pub fn new(
+        f: impl Fn(<<Q as Queryable<'a>>::Iter as Iterator>::Item) + 'static,
+    ) -> System<'a, Q> {
+        System {
+            query: PhantomData,
+            function: Box::new(f),
+        }
+    }
+}
+
 impl<'a, Q: Queryable<'a>> Runnable for System<'a, Q> {
     fn run(&mut self, ecs: &mut Ecs) {
         for p in Q::fetch(ecs) {
@@ -601,12 +612,9 @@ mod tests {
             .with_component(Burnable)
             .build();
 
-        let mut heal_system = System::<(Mut<Health>,)> {
-            query: PhantomData,
-            function: Box::new(|(health,)| {
-                health.health = 100.0;
-            }),
-        };
+        let mut heal_system = System::<(Mut<Health>,)>::new(|(health,)| {
+            health.health = 100.0;
+        });
 
         heal_system.run(&mut ecs);
 
