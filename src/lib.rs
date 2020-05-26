@@ -377,6 +377,19 @@ tuple_queryable_impl!(A, B, C, D, E, F,);
 tuple_queryable_impl!(A, B, C, D, E, F, G,);
 tuple_queryable_impl!(A, B, C, D, E, F, G, H,);
 
+pub struct System<'a, Q: Queryable<'a>> {
+    query: PhantomData<Q>,
+    function: Box<dyn FnMut(<<Q as Queryable<'a>>::Iter as Iterator>::Item)>,
+}
+
+impl<'a, Q: Queryable<'a>> System<'a, Q> {
+    pub fn run(&mut self, ecs: &mut Ecs) {
+        for p in Q::fetch(ecs) {
+            (self.function)(p);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,6 +560,43 @@ mod tests {
             <(Mut<Position>, Imm<Speed>)>::fetch(&mut ecs).next(),
             Some((&mut Position { x: 0.5, y: 2.3 }, &Speed { x: 1.0, y: 4.0 }))
         );
+    }
+
+    #[test]
+    pub fn ecs_system() {
+        let mut ecs = Ecs::new();
+
+        ecs.new_entity()
+            .with_component(Position { x: 0.5, y: 2.3 })
+            .with_component(Speed { x: 1.0, y: 4.0 })
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 1.0, y: 2.3 })
+            .with_component(Speed { x: 12.0, y: 42.0 })
+            .with_component(Health { health: 100.0 })
+            .with_component(Burnable)
+            .build();
+
+        ecs.new_entity()
+            .with_component(Position { x: 18.2, y: 4.5 })
+            .with_component(Speed { x: 122.0, y: 12.0 })
+            .with_component(Health { health: 95.0 })
+            .with_component(Burnable)
+            .build();
+
+        let mut heal_system = System::<(Mut<Health>,)> {
+            query: PhantomData,
+            function: Box::new(|(health,)| {
+                health.health = 100.0;
+            }),
+        };
+
+        heal_system.run(&mut ecs);
+
+        for (health,) in <(Imm<Health>,)>::fetch(&mut ecs) {
+            assert_eq!(health.health, 100.0);
+        }
     }
 
     #[test]
