@@ -1,7 +1,9 @@
 [package]
 name = "tecs"
 description = "TeaECS, a simple ECS"
-version = "0.1.0"
+version = "1.0.0"
+repository = "https://github.com/Lisible/tecs/"
+license = "MIT"
 authors = ["Clément Sibille <clement.sibille@protonmail.com>"]
 edition = "2018"
 
