@@ -99,31 +99,6 @@ impl<C: 'static> Accessor for WriteAccessor<C> {
         }
     }
 }
-/*
-impl<A: Accessor, B: Accessor> Query for (A, B) {
-    fn query_description() -> QueryDescription {
-        let mut description = QueryDescription {
-            read_components: vec![],
-            written_components: vec![],
-        };
-
-        let mut a_description = A::query_description();
-        description
-            .read_components
-            .append(&mut a_description.read_components);
-        description
-            .written_components
-            .append(&mut a_description.written_components);
-        let mut b_description = B::query_description();
-        description
-            .read_components
-            .append(&mut b_description.read_components);
-        description
-            .written_components
-            .append(&mut b_description.written_components);
-        description
-    }
-}*/
 
 macro_rules! impl_query_tuple {
     ($H:ident$(, $T:tt)+) => {
