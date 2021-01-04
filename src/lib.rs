@@ -1,6 +1,7 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 
 pub type EntityId = usize;
 pub type Component = Box<dyn Any>;
@@ -27,11 +28,11 @@ impl Ecs {
         self.component_store.get_component::<C>(entity_id)
     }
 
-    pub fn fetch<'a, C: 'static>(&'a self) -> impl Iterator<Item = &'a C> {
+    pub fn fetch<C: 'static>(&self) -> impl Iterator<Item = &C> {
         self.component_store.component_iterator::<C>()
     }
 
-    pub fn fetch_mut<'a, C: 'static>(&'a mut self) -> impl Iterator<Item = &'a mut C> {
+    pub fn fetch_mut<C: 'static>(&mut self) -> impl Iterator<Item = &mut C> {
         self.component_store.component_iterator_mut::<C>()
     }
 }
@@ -110,6 +111,31 @@ impl ComponentStore {
     }
 }
 
+pub struct ReadAccessor<C: 'static>(PhantomData<C>);
+pub struct WriteAccessor<C: 'static>(PhantomData<C>);
+
+pub trait Queryable<'a> {
+    type Iterator: Iterator + 'a;
+
+    fn query(ecs: &'a mut Ecs) -> Self::Iterator;
+}
+
+impl<'a, C: 'static> Queryable<'a> for ReadAccessor<C> {
+    type Iterator = Box<dyn Iterator<Item = &'a C> + 'a>;
+
+    fn query(ecs: &'a mut Ecs) -> Self::Iterator {
+        Box::new(ecs.fetch::<C>())
+    }
+}
+
+impl<'a, C: 'static> Queryable<'a> for WriteAccessor<C> {
+    type Iterator = Box<dyn Iterator<Item = &'a mut C> + 'a>;
+
+    fn query(ecs: &'a mut Ecs) -> Self::Iterator {
+        Box::new(ecs.fetch_mut::<C>())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +207,38 @@ mod tests {
         assert_eq!(ecs.fetch_mut::<RectangleShape>().count(), 0);
 
         let mut positions = ecs.fetch_mut::<Position>();
+        assert_eq!(positions.next(), Some(&mut Position { x: 6f32, y: 2f32 }));
+        assert_eq!(positions.next(), Some(&mut Position { x: 3f32, y: 24f32 }));
+    }
+
+    #[test]
+    fn read_accessor_query() {
+        let mut ecs = Ecs::new();
+        ecs.create_entity(vec![
+            Box::new(Position { x: 6f32, y: 2f32 }),
+            Box::new(Velocity { x: 1f32, y: 0f32 }),
+        ]);
+        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
+
+        assert_eq!(<ReadAccessor<Position>>::query(&mut ecs).count(), 2);
+
+        let mut positions = <ReadAccessor<Position>>::query(&mut ecs);
+        assert_eq!(positions.next(), Some(&Position { x: 6f32, y: 2f32 }));
+        assert_eq!(positions.next(), Some(&Position { x: 3f32, y: 24f32 }));
+    }
+
+    #[test]
+    fn write_accessor_query() {
+        let mut ecs = Ecs::new();
+        ecs.create_entity(vec![
+            Box::new(Position { x: 6f32, y: 2f32 }),
+            Box::new(Velocity { x: 1f32, y: 0f32 }),
+        ]);
+        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
+
+        assert_eq!(<WriteAccessor<Position>>::query(&mut ecs).count(), 2);
+
+        let mut positions = <WriteAccessor<Position>>::query(&mut ecs);
         assert_eq!(positions.next(), Some(&mut Position { x: 6f32, y: 2f32 }));
         assert_eq!(positions.next(), Some(&mut Position { x: 3f32, y: 24f32 }));
     }
