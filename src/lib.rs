@@ -27,6 +27,10 @@ impl Ecs {
     pub fn get<C: 'static + Debug>(&self, entity_id: EntityId) -> Option<&C> {
         self.component_store.get_component::<C>(entity_id)
     }
+
+    pub fn fetch<'a, C: 'static>(&'a self) -> impl Iterator<Item = &'a C> {
+        self.component_store.component_iterator::<C>()
+    }
 }
 
 #[derive(Debug)]
@@ -59,7 +63,17 @@ impl ComponentStore {
             .as_ref()?
             .downcast_ref()
     }
+
+    pub fn component_iterator<'a, C: 'static>(&'a self) -> impl Iterator<Item = &'a C> {
+        self.components_vecs
+            .get(&TypeId::of::<C>())
+            .unwrap()
+            .iter()
+            .map(|c| c.as_ref().unwrap().downcast_ref().unwrap())
+    }
 }
+
+pub struct ComponentIterator {}
 
 pub struct ReadAccessor<C> {
     marker: PhantomData<C>,
@@ -74,6 +88,7 @@ trait Accessor {
 }
 
 trait Query {
+    fn query(ecs: &Ecs);
     fn query_description() -> QueryDescription;
 }
 
@@ -99,38 +114,6 @@ impl<C: 'static> Accessor for WriteAccessor<C> {
         }
     }
 }
-
-macro_rules! impl_query_tuple {
-    ($H:ident$(, $T:tt)+) => {
-        impl<$H: Accessor $(, $T: Accessor)+> Query for ($H $(,$T)*,) {
-            fn query_description() -> QueryDescription {
-                let mut description = QueryDescription {
-                    read_components: vec![],
-                    written_components: vec![]
-                };
-
-                let mut h_description = $H::query_description();
-                description.read_components.append(&mut h_description.read_components);
-                description.written_components.append(&mut h_description.written_components);
-
-
-                $({
-                    let mut t_description = $T::query_description();
-                    description.read_components.append(&mut t_description.read_components);
-                    description.written_components.append(&mut t_description.written_components);
-                })+
-                description
-            }
-        }
-    }
-}
-
-impl_query_tuple!(A, B);
-impl_query_tuple!(A, B, C);
-impl_query_tuple!(A, B, C, D);
-impl_query_tuple!(A, B, C, D, E);
-impl_query_tuple!(A, B, C, D, E, F);
-impl_query_tuple!(A, B, C, D, E, F, G);
 
 #[cfg(test)]
 mod tests {
@@ -174,67 +157,18 @@ mod tests {
     }
 
     #[test]
-    fn query_with_single_read_accessor_can_be_transformed_into_query_description() {
-        let query_description = <ReadAccessor<Position>>::query_description();
+    fn ecs_can_fetch_single_component() {
+        let mut ecs = Ecs::new();
+        ecs.create_entity(vec![
+            Box::new(Position { x: 6f32, y: 2f32 }),
+            Box::new(Velocity { x: 1f32, y: 0f32 }),
+        ]);
+        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
 
-        assert_eq!(1, query_description.read_components.len());
-        assert_eq!(0, query_description.written_components.len());
-        assert_eq!(
-            &TypeId::of::<Position>(),
-            query_description.read_components.get(0).unwrap()
-        );
-    }
+        assert_eq!(ecs.fetch::<Position>().count(), 2);
 
-    #[test]
-    fn query_with_single_write_accessor_can_be_transformed_into_query_description() {
-        let query_description = <WriteAccessor<Position>>::query_description();
-
-        assert_eq!(0, query_description.read_components.len());
-        assert_eq!(1, query_description.written_components.len());
-        assert_eq!(
-            &TypeId::of::<Position>(),
-            query_description.written_components.get(0).unwrap()
-        )
-    }
-
-    #[test]
-    fn query_with_multiple_read_accessor_can_be_transformed_into_query_description() {
-        let query_description =
-            <(ReadAccessor<Position>, ReadAccessor<Velocity>)>::query_description();
-
-        assert_eq!(2, query_description.read_components.len());
-        assert_eq!(0, query_description.written_components.len());
-        assert_eq!(
-            &TypeId::of::<Position>(),
-            query_description.read_components.get(0).unwrap()
-        );
-        assert_eq!(
-            &TypeId::of::<Velocity>(),
-            query_description.read_components.get(1).unwrap()
-        );
-    }
-
-    #[test]
-    fn query_with_mixed_accessors_can_be_transformed_into_query_description() {
-        let query_description = <(
-            WriteAccessor<Position>,
-            ReadAccessor<Velocity>,
-            ReadAccessor<RectangleShape>,
-        )>::query_description();
-
-        assert_eq!(2, query_description.read_components.len());
-        assert_eq!(1, query_description.written_components.len());
-        assert_eq!(
-            &TypeId::of::<Velocity>(),
-            query_description.read_components.get(0).unwrap()
-        );
-        assert_eq!(
-            &TypeId::of::<RectangleShape>(),
-            query_description.read_components.get(1).unwrap()
-        );
-        assert_eq!(
-            &TypeId::of::<Position>(),
-            query_description.written_components.get(0).unwrap()
-        )
+        let mut positions = ecs.fetch::<Position>();
+        assert_eq!(positions.next(), Some(&Position { x: 6f32, y: 2f32 }));
+        assert_eq!(positions.next(), Some(&Position { x: 3f32, y: 24f32 }));
     }
 }
