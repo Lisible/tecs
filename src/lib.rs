@@ -64,12 +64,24 @@ impl ComponentStore {
             .downcast_ref()
     }
 
-    pub fn component_iterator<'a, C: 'static>(&'a self) -> impl Iterator<Item = &'a C> {
-        self.components_vecs
-            .get(&TypeId::of::<C>())
-            .unwrap()
-            .iter()
-            .map(|c| c.as_ref().unwrap().downcast_ref().unwrap())
+    pub fn component_iterator<'a, C: 'static>(&'a self) -> Box<dyn Iterator<Item = &'a C> + 'a> {
+        if !self.components_vecs.contains_key(&TypeId::of::<C>()) {
+            return Box::new(std::iter::empty::<&'a C>());
+        }
+
+        Box::new(
+            self.components_vecs
+                .get(&TypeId::of::<C>())
+                .unwrap()
+                .iter()
+                .filter(|c| c.is_some())
+                .map(|c| {
+                    c.as_ref()
+                        .unwrap()
+                        .downcast_ref()
+                        .expect("Downcasting component into the wrong type")
+                }),
+        )
     }
 }
 
@@ -166,6 +178,7 @@ mod tests {
         ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
 
         assert_eq!(ecs.fetch::<Position>().count(), 2);
+        assert_eq!(ecs.fetch::<RectangleShape>().count(), 0);
 
         let mut positions = ecs.fetch::<Position>();
         assert_eq!(positions.next(), Some(&Position { x: 6f32, y: 2f32 }));
