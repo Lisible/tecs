@@ -1,4 +1,3 @@
-use core::marker::PhantomData;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -30,6 +29,10 @@ impl Ecs {
 
     pub fn fetch<'a, C: 'static>(&'a self) -> impl Iterator<Item = &'a C> {
         self.component_store.component_iterator::<C>()
+    }
+
+    pub fn fetch_mut<'a, C: 'static>(&'a mut self) -> impl Iterator<Item = &'a mut C> {
+        self.component_store.component_iterator_mut::<C>()
     }
 }
 
@@ -83,47 +86,27 @@ impl ComponentStore {
                 }),
         )
     }
-}
 
-pub struct ComponentIterator {}
-
-pub struct ReadAccessor<C> {
-    marker: PhantomData<C>,
-}
-
-pub struct WriteAccessor<C> {
-    marker: PhantomData<C>,
-}
-
-trait Accessor {
-    fn query_description() -> QueryDescription;
-}
-
-trait Query {
-    fn query(ecs: &Ecs);
-    fn query_description() -> QueryDescription;
-}
-
-pub struct QueryDescription {
-    pub read_components: Vec<ComponentType>,
-    pub written_components: Vec<ComponentType>,
-}
-
-impl<C: 'static> Accessor for ReadAccessor<C> {
-    fn query_description() -> QueryDescription {
-        QueryDescription {
-            read_components: vec![TypeId::of::<C>()],
-            written_components: vec![],
+    pub fn component_iterator_mut<'a, C: 'static>(
+        &'a mut self,
+    ) -> Box<dyn Iterator<Item = &'a mut C> + 'a> {
+        if !self.components_vecs.contains_key(&TypeId::of::<C>()) {
+            return Box::new(std::iter::empty::<&'a mut C>());
         }
-    }
-}
 
-impl<C: 'static> Accessor for WriteAccessor<C> {
-    fn query_description() -> QueryDescription {
-        QueryDescription {
-            read_components: vec![],
-            written_components: vec![TypeId::of::<C>()],
-        }
+        Box::new(
+            self.components_vecs
+                .get_mut(&TypeId::of::<C>())
+                .unwrap()
+                .iter_mut()
+                .filter(|c| c.is_some())
+                .map(|c| {
+                    c.as_mut()
+                        .unwrap()
+                        .downcast_mut()
+                        .expect("Downcasting component into the wrong type")
+                }),
+        )
     }
 }
 
@@ -169,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn ecs_can_fetch_single_component() {
+    fn ecs_can_fetch_single_component_immutably() {
         let mut ecs = Ecs::new();
         ecs.create_entity(vec![
             Box::new(Position { x: 6f32, y: 2f32 }),
@@ -183,5 +166,22 @@ mod tests {
         let mut positions = ecs.fetch::<Position>();
         assert_eq!(positions.next(), Some(&Position { x: 6f32, y: 2f32 }));
         assert_eq!(positions.next(), Some(&Position { x: 3f32, y: 24f32 }));
+    }
+
+    #[test]
+    fn ecs_can_fetch_single_component_mutably() {
+        let mut ecs = Ecs::new();
+        ecs.create_entity(vec![
+            Box::new(Position { x: 6f32, y: 2f32 }),
+            Box::new(Velocity { x: 1f32, y: 0f32 }),
+        ]);
+        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
+
+        assert_eq!(ecs.fetch_mut::<Position>().count(), 2);
+        assert_eq!(ecs.fetch_mut::<RectangleShape>().count(), 0);
+
+        let mut positions = ecs.fetch_mut::<Position>();
+        assert_eq!(positions.next(), Some(&mut Position { x: 6f32, y: 2f32 }));
+        assert_eq!(positions.next(), Some(&mut Position { x: 3f32, y: 24f32 }));
     }
 }
