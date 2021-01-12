@@ -1,7 +1,6 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 
 pub type EntityId = usize;
 pub type Component = Box<dyn Any>;
@@ -19,120 +18,60 @@ impl Ecs {
         }
     }
 
-    pub fn create_entity(&mut self, components: Vec<Component>) -> EntityId {
-        self.component_store
-            .allocate_entity_with_components(components)
+    pub fn create_entity<T: EntityDefinition>(&mut self, entity: T) -> EntityId {
+        self.component_store.create_entity(entity)
     }
 
-    pub fn get<C: 'static + Debug>(&self, entity_id: EntityId) -> Option<&C> {
-        self.component_store.get_component::<C>(entity_id)
-    }
-
-    pub fn fetch<C: 'static>(&self) -> impl Iterator<Item = &C> {
-        self.component_store.component_iterator::<C>()
-    }
-
-    pub fn fetch_mut<C: 'static>(&mut self) -> impl Iterator<Item = &mut C> {
-        self.component_store.component_iterator_mut::<C>()
+    pub fn entity_count(&self) -> usize {
+        0
     }
 }
 
 #[derive(Debug)]
 struct ComponentStore {
-    components_vecs: HashMap<TypeId, Vec<Option<Component>>>,
+    archetypes: HashMap<ArchetypeDescription, ArchetypeData>,
 }
 
 impl ComponentStore {
     pub fn new() -> Self {
         ComponentStore {
-            components_vecs: HashMap::new(),
+            archetypes: HashMap::new(),
         }
     }
 
-    pub fn allocate_entity_with_components(&mut self, components: Vec<Component>) -> EntityId {
-        for component in components {
-            let type_id = (*component).type_id();
-            self.components_vecs
-                .entry(type_id)
-                .or_insert(vec![])
-                .push(Some(component));
-        }
-        self.components_vecs.iter().next().unwrap().1.len() - 1
-    }
+    pub fn create_entity<T: EntityDefinition>(&mut self, entity: T) -> EntityId {
+        let archetype_description = T::archetype_description();
+        let archetype_data = self
+            .archetypes
+            .entry(archetype_description)
+            .or_insert(ArchetypeData);
 
-    pub fn get_component<C: 'static + Debug>(&self, entity_id: EntityId) -> Option<&C> {
-        self.components_vecs
-            .get(&TypeId::of::<C>())?
-            .get(entity_id)?
-            .as_ref()?
-            .downcast_ref()
-    }
-
-    pub fn component_iterator<'a, C: 'static>(&'a self) -> Box<dyn Iterator<Item = &'a C> + 'a> {
-        if !self.components_vecs.contains_key(&TypeId::of::<C>()) {
-            return Box::new(std::iter::empty::<&'a C>());
-        }
-
-        Box::new(
-            self.components_vecs
-                .get(&TypeId::of::<C>())
-                .unwrap()
-                .iter()
-                .filter(|c| c.is_some())
-                .map(|c| {
-                    c.as_ref()
-                        .unwrap()
-                        .downcast_ref()
-                        .expect("Downcasting component into the wrong type")
-                }),
-        )
-    }
-
-    pub fn component_iterator_mut<'a, C: 'static>(
-        &'a mut self,
-    ) -> Box<dyn Iterator<Item = &'a mut C> + 'a> {
-        if !self.components_vecs.contains_key(&TypeId::of::<C>()) {
-            return Box::new(std::iter::empty::<&'a mut C>());
-        }
-
-        Box::new(
-            self.components_vecs
-                .get_mut(&TypeId::of::<C>())
-                .unwrap()
-                .iter_mut()
-                .filter(|c| c.is_some())
-                .map(|c| {
-                    c.as_mut()
-                        .unwrap()
-                        .downcast_mut()
-                        .expect("Downcasting component into the wrong type")
-                }),
-        )
+        archetype_data.insert(entity)
     }
 }
 
-pub struct ReadAccessor<C: 'static>(PhantomData<C>);
-pub struct WriteAccessor<C: 'static>(PhantomData<C>);
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct ArchetypeDescription;
 
-pub trait Queryable<'a> {
-    type Iterator: Iterator + 'a;
+#[derive(Debug)]
+pub struct ArchetypeData;
+impl ArchetypeData {
+    pub fn new() -> Self {
+        Self
+    }
 
-    fn query(ecs: &'a mut Ecs) -> Self::Iterator;
-}
-
-impl<'a, C: 'static> Queryable<'a> for ReadAccessor<C> {
-    type Iterator = Box<dyn Iterator<Item = &'a C> + 'a>;
-
-    fn query(ecs: &'a mut Ecs) -> Self::Iterator {
-        Box::new(ecs.fetch::<C>())
+    pub fn insert<T>(&mut self, entity: T) -> EntityId {
+        0
     }
 }
 
-impl<'a, C: 'static> Queryable<'a> for WriteAccessor<C> {
-    type Iterator = Box<dyn Iterator<Item = &'a mut C> + 'a>;
+pub trait EntityDefinition {
+    fn archetype_description() -> ArchetypeDescription;
+}
 
-    fn query(ecs: &'a mut Ecs) -> Self::Iterator {
-        Box::new(ecs.fetch_mut::<C>())
+impl<A, B> EntityDefinition for (A, B) {
+    fn archetype_description() -> ArchetypeDescription {
+        ArchetypeDescription
     }
 }
 
@@ -159,87 +98,16 @@ mod tests {
     }
 
     #[test]
-    fn ecs_should_create_entity() {
-        let mut ecs = Ecs::new();
-        let entity_id = ecs.create_entity(vec![
-            Box::new(Position { x: 5f32, y: 2f32 }),
-            Box::new(Velocity { x: 1f32, y: 0f32 }),
-        ]);
-
-        assert_eq!(
-            Position { x: 5f32, y: 2f32 },
-            *ecs.get::<Position>(entity_id).unwrap()
-        );
-        assert_eq!(
-            Velocity { x: 1f32, y: 0f32 },
-            *ecs.get::<Velocity>(entity_id).unwrap()
-        );
-        assert_eq!(None, ecs.get::<RectangleShape>(entity_id));
+    pub fn ecs_new() {
+        let ecs = Ecs::new();
+        assert_eq!(ecs.entity_count(), 0);
     }
 
     #[test]
-    fn ecs_can_fetch_single_component_immutably() {
+    pub fn ecs_create_entity() {
         let mut ecs = Ecs::new();
-        ecs.create_entity(vec![
-            Box::new(Position { x: 6f32, y: 2f32 }),
-            Box::new(Velocity { x: 1f32, y: 0f32 }),
-        ]);
-        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
-
-        assert_eq!(ecs.fetch::<Position>().count(), 2);
-        assert_eq!(ecs.fetch::<RectangleShape>().count(), 0);
-
-        let mut positions = ecs.fetch::<Position>();
-        assert_eq!(positions.next(), Some(&Position { x: 6f32, y: 2f32 }));
-        assert_eq!(positions.next(), Some(&Position { x: 3f32, y: 24f32 }));
-    }
-
-    #[test]
-    fn ecs_can_fetch_single_component_mutably() {
-        let mut ecs = Ecs::new();
-        ecs.create_entity(vec![
-            Box::new(Position { x: 6f32, y: 2f32 }),
-            Box::new(Velocity { x: 1f32, y: 0f32 }),
-        ]);
-        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
-
-        assert_eq!(ecs.fetch_mut::<Position>().count(), 2);
-        assert_eq!(ecs.fetch_mut::<RectangleShape>().count(), 0);
-
-        let mut positions = ecs.fetch_mut::<Position>();
-        assert_eq!(positions.next(), Some(&mut Position { x: 6f32, y: 2f32 }));
-        assert_eq!(positions.next(), Some(&mut Position { x: 3f32, y: 24f32 }));
-    }
-
-    #[test]
-    fn read_accessor_query() {
-        let mut ecs = Ecs::new();
-        ecs.create_entity(vec![
-            Box::new(Position { x: 6f32, y: 2f32 }),
-            Box::new(Velocity { x: 1f32, y: 0f32 }),
-        ]);
-        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
-
-        assert_eq!(<ReadAccessor<Position>>::query(&mut ecs).count(), 2);
-
-        let mut positions = <ReadAccessor<Position>>::query(&mut ecs);
-        assert_eq!(positions.next(), Some(&Position { x: 6f32, y: 2f32 }));
-        assert_eq!(positions.next(), Some(&Position { x: 3f32, y: 24f32 }));
-    }
-
-    #[test]
-    fn write_accessor_query() {
-        let mut ecs = Ecs::new();
-        ecs.create_entity(vec![
-            Box::new(Position { x: 6f32, y: 2f32 }),
-            Box::new(Velocity { x: 1f32, y: 0f32 }),
-        ]);
-        ecs.create_entity(vec![Box::new(Position { x: 3f32, y: 24f32 })]);
-
-        assert_eq!(<WriteAccessor<Position>>::query(&mut ecs).count(), 2);
-
-        let mut positions = <WriteAccessor<Position>>::query(&mut ecs);
-        assert_eq!(positions.next(), Some(&mut Position { x: 6f32, y: 2f32 }));
-        assert_eq!(positions.next(), Some(&mut Position { x: 3f32, y: 24f32 }));
+        assert_eq!(ecs.entity_count(), 0);
+        ecs.create_entity((Position { x: 0f32, y: 0f32 }, Velocity { x: 0f32, y: 0f32 }));
+        assert_eq!(ecs.entity_count(), 1);
     }
 }
