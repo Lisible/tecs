@@ -29,7 +29,7 @@ impl Ecs {
 
 #[derive(Debug)]
 struct ComponentStore {
-    archetypes: HashMap<ArchetypeDescription, ArchetypeData>,
+    archetypes: HashMap<ArchetypeDescription, Box<dyn GenericArchetypeStorage>>,
 }
 
 impl ComponentStore {
@@ -44,32 +44,49 @@ impl ComponentStore {
         let archetype_data = self
             .archetypes
             .entry(archetype_description)
-            .or_insert(ArchetypeData);
-
-        archetype_data.insert(entity)
+            .or_insert(Box::new(VecStorage::<T>::new()));
+        0
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct ArchetypeDescription;
 
-#[derive(Debug)]
-pub struct ArchetypeData;
-impl ArchetypeData {
-    pub fn new() -> Self {
-        Self
-    }
+pub trait GenericArchetypeStorage: Debug {}
 
-    pub fn insert<T>(&mut self, entity: T) -> EntityId {
-        0
+pub trait ArchetypeStorage: GenericArchetypeStorage {
+    type InnerType;
+
+    fn insert(&mut self, entity: Self::InnerType) -> EntityId;
+}
+
+#[derive(Debug)]
+pub struct VecStorage<T: Debug> {
+    data: Vec<T>,
+}
+
+impl<T: Debug> VecStorage<T> {
+    pub fn new() -> Self {
+        Self { data: vec![] }
     }
 }
 
-pub trait EntityDefinition {
+impl<T: Debug> GenericArchetypeStorage for VecStorage<T> {}
+
+impl<T: Debug> ArchetypeStorage for VecStorage<T> {
+    type InnerType = T;
+
+    fn insert(&mut self, entity: Self::InnerType) -> EntityId {
+        self.data.push(entity);
+        self.data.len() - 1
+    }
+}
+
+pub trait EntityDefinition: Debug + 'static {
     fn archetype_description() -> ArchetypeDescription;
 }
 
-impl<A, B> EntityDefinition for (A, B) {
+impl<A: Debug + 'static, B: Debug + 'static> EntityDefinition for (A, B) {
     fn archetype_description() -> ArchetypeDescription {
         ArchetypeDescription
     }
