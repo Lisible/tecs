@@ -1,94 +1,76 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::ptr::NonNull;
 
 pub type EntityId = usize;
 pub type Component = Box<dyn Any>;
 pub type ComponentType = TypeId;
 
-#[derive(Debug)]
 pub struct Ecs {
-    component_store: ComponentStore,
+    archetypes: HashMap<Box<[ComponentType]>, Archetype>,
 }
 
 impl Ecs {
     pub fn new() -> Ecs {
         Ecs {
-            component_store: ComponentStore::new(),
-        }
-    }
-
-    pub fn create_entity<T: EntityDefinition>(&mut self, entity: T) -> EntityId {
-        self.component_store.create_entity(entity)
-    }
-
-    pub fn entity_count(&self) -> usize {
-        0
-    }
-}
-
-#[derive(Debug)]
-struct ComponentStore {
-    archetypes: HashMap<ArchetypeDescription, Box<dyn GenericArchetypeStorage>>,
-}
-
-impl ComponentStore {
-    pub fn new() -> Self {
-        ComponentStore {
             archetypes: HashMap::new(),
         }
     }
 
-    pub fn create_entity<T: EntityDefinition>(&mut self, entity: T) -> EntityId {
-        let archetype_description = T::archetype_description();
-        let archetype_data = self
-            .archetypes
-            .entry(archetype_description)
-            .or_insert(Box::new(VecStorage::<T>::new()));
-        0
+    pub fn create_entity<D: ComponentsDefinition>(&mut self, components_definition: D) {
+        let archetype = self.get_or_insert_archetype::<D>();
+        archetype.create_entity(components_definition);
+    }
+
+    pub fn entity_count(&self) -> usize {
+        self.archetypes.values().map(|a| a.entity_count()).sum()
+    }
+
+    pub fn archetype<D: ComponentsDefinition>(&self) -> Option<&Archetype> {
+        self.archetypes.get(&D::component_types())
+    }
+
+    fn get_or_insert_archetype<D: ComponentsDefinition>(&mut self) -> &mut Archetype {
+        self.archetypes
+            .entry(D::component_types())
+            .or_insert(Archetype::new())
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct ArchetypeDescription;
-
-pub trait GenericArchetypeStorage: Debug {}
-
-pub trait ArchetypeStorage: GenericArchetypeStorage {
-    type InnerType;
-
-    fn insert(&mut self, entity: Self::InnerType) -> EntityId;
+pub struct Archetype {
+    archetype_data: NonNull<u8>,
+    entity_count: usize,
 }
-
-#[derive(Debug)]
-pub struct VecStorage<T: Debug> {
-    data: Vec<T>,
-}
-
-impl<T: Debug> VecStorage<T> {
+impl Archetype {
     pub fn new() -> Self {
-        Self { data: vec![] }
+        Self {
+            archetype_data: NonNull::dangling(),
+            entity_count: 0,
+        }
+    }
+
+    pub fn create_entity<D: ComponentsDefinition>(&mut self, components_definition: D) {
+        self.entity_count += 1;
+    }
+
+    pub fn entity_count(&self) -> usize {
+        self.entity_count
     }
 }
 
-impl<T: Debug> GenericArchetypeStorage for VecStorage<T> {}
-
-impl<T: Debug> ArchetypeStorage for VecStorage<T> {
-    type InnerType = T;
-
-    fn insert(&mut self, entity: Self::InnerType) -> EntityId {
-        self.data.push(entity);
-        self.data.len() - 1
+impl Default for Archetype {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-pub trait EntityDefinition: Debug + 'static {
-    fn archetype_description() -> ArchetypeDescription;
+pub trait ComponentsDefinition {
+    fn component_types() -> Box<[ComponentType]>;
 }
 
-impl<A: Debug + 'static, B: Debug + 'static> EntityDefinition for (A, B) {
-    fn archetype_description() -> ArchetypeDescription {
-        ArchetypeDescription
+impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
+    fn component_types() -> Box<[ComponentType]> {
+        Box::new([TypeId::of::<A>(), TypeId::of::<B>()])
     }
 }
 
@@ -126,5 +108,11 @@ mod tests {
         assert_eq!(ecs.entity_count(), 0);
         ecs.create_entity((Position { x: 0f32, y: 0f32 }, Velocity { x: 0f32, y: 0f32 }));
         assert_eq!(ecs.entity_count(), 1);
+        assert_eq!(
+            ecs.archetype::<(Position, Velocity)>()
+                .iter_entities()
+                .next(),
+            Some(&(Position { x: 0f32, y: 0f32 }, Velocity { x: 0f32, y: 0f32 }))
+        );
     }
 }
