@@ -1,6 +1,5 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::ptr::NonNull;
 
 pub type EntityId = usize;
 pub type Component = Box<dyn Any>;
@@ -8,22 +7,23 @@ pub type ComponentType = TypeId;
 
 pub struct Ecs {
     archetypes: HashMap<Box<[ComponentType]>, Archetype>,
+    entity_store: EntityStore,
 }
 
 impl Ecs {
     pub fn new() -> Ecs {
         Ecs {
             archetypes: HashMap::new(),
+            entity_store: EntityStore::new(),
         }
     }
 
-    pub fn create_entity<D: ComponentsDefinition>(&mut self, components_definition: D) {
-        let archetype = self.get_or_insert_archetype::<D>();
-        archetype.create_entity(components_definition);
+    pub fn create_entity<D: ComponentsDefinition>(&mut self, _components_definition: D) {
+        let _archetype = self.get_or_insert_archetype::<D>();
     }
 
     pub fn entity_count(&self) -> usize {
-        self.archetypes.values().map(|a| a.entity_count()).sum()
+        self.entity_store.entity_count()
     }
 
     pub fn archetype<D: ComponentsDefinition>(&self) -> Option<&Archetype> {
@@ -37,30 +37,44 @@ impl Ecs {
     }
 }
 
-pub struct Archetype {
-    archetype_data: NonNull<u8>,
-    entity_count: usize,
+pub struct EntityStore {
+    next_id: EntityId,
+    free_list: Vec<EntityId>,
 }
-impl Archetype {
+
+impl EntityStore {
     pub fn new() -> Self {
         Self {
-            archetype_data: NonNull::dangling(),
-            entity_count: 0,
+            next_id: 1,
+            free_list: vec![],
         }
     }
 
-    pub fn create_entity<D: ComponentsDefinition>(&mut self, components_definition: D) {
-        self.entity_count += 1;
+    pub fn allocate_entity(&mut self) -> EntityId {
+        let id = if self.free_list.is_empty() {
+            let next_id = self.next_id;
+            self.next_id += 1;
+            next_id
+        } else {
+            self.free_list.pop().unwrap()
+        };
+        id
+    }
+
+    pub fn free_entity(&mut self, id: EntityId) {
+        self.free_list.push(id);
     }
 
     pub fn entity_count(&self) -> usize {
-        self.entity_count
+        self.next_id - self.free_list.len() - 1
     }
 }
 
-impl Default for Archetype {
-    fn default() -> Self {
-        Self::new()
+pub struct Archetype;
+
+impl Archetype {
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -103,16 +117,31 @@ mod tests {
     }
 
     #[test]
-    pub fn ecs_create_entity() {
-        let mut ecs = Ecs::new();
-        assert_eq!(ecs.entity_count(), 0);
-        ecs.create_entity((Position { x: 0f32, y: 0f32 }, Velocity { x: 0f32, y: 0f32 }));
-        assert_eq!(ecs.entity_count(), 1);
-        assert_eq!(
-            ecs.archetype::<(Position, Velocity)>()
-                .iter_entities()
-                .next(),
-            Some(&(Position { x: 0f32, y: 0f32 }, Velocity { x: 0f32, y: 0f32 }))
-        );
+    pub fn entity_store_new() {
+        let entity_store = EntityStore::new();
+        assert_eq!(entity_store.entity_count(), 0);
+    }
+
+    #[test]
+    pub fn entity_store_allocate() {
+        let mut entity_store = EntityStore::new();
+        let first_entity_id = entity_store.allocate_entity();
+        assert_eq!(entity_store.entity_count(), 1);
+        assert_eq!(first_entity_id, 1);
+    }
+
+    #[test]
+    pub fn entity_store_reallocate() {
+        let mut entity_store = EntityStore::new();
+        let first_entity_id = entity_store.allocate_entity();
+        assert_eq!(entity_store.entity_count(), 1);
+        assert_eq!(first_entity_id, 1);
+
+        entity_store.free_entity(first_entity_id);
+        assert_eq!(entity_store.entity_count(), 0);
+
+        let second_entity_id = entity_store.allocate_entity();
+        assert_eq!(entity_store.entity_count(), 1);
+        assert_eq!(second_entity_id, 1)
     }
 }
