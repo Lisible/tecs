@@ -62,6 +62,7 @@ impl EntityStore {
     }
 
     pub fn free_entity(&mut self, id: EntityId) {
+        assert!(id < self.next_id);
         self.free_list.push(id);
     }
 
