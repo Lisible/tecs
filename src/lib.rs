@@ -41,7 +41,7 @@ impl Ecs {
 }
 
 pub struct Archetype {
-    types_metadata: Vec<TypeMetadata>,
+    components_metadata: ComponentsMetadata,
     data: NonNull<u8>,
     entity_count: usize,
     capacity: usize,
@@ -50,7 +50,7 @@ pub struct Archetype {
 impl Archetype {
     pub fn new<C: ComponentsDefinition>() -> Self {
         Self {
-            types_metadata: C::metadata(),
+            components_metadata: C::metadata(),
             data: NonNull::dangling(),
             entity_count: 0,
             capacity: 0,
@@ -77,9 +77,9 @@ impl Archetype {
 
     fn grow(&mut self) {
         unsafe {
-            let _entity_alignment = self.types_metadata[0].entity_alignment;
-            let _entity_size = self.types_metadata[0].entity_size;
-            let entity_layout = self.types_metadata[0].entity_layout;
+            let _entity_alignment = self.components_metadata.entity_alignment;
+            let _entity_size = self.components_metadata.entity_size;
+            let entity_layout = self.components_metadata.entity_layout;
 
             // TODO handle realloc
             let (new_capacity, ptr) = {
@@ -134,7 +134,7 @@ impl EntityStore {
 
 pub trait ComponentsDefinition {
     fn component_types() -> Box<[ComponentType]>;
-    fn metadata() -> Vec<TypeMetadata>;
+    fn metadata() -> ComponentsMetadata;
     fn store_components(&mut self, archetype: &mut Archetype);
 }
 
@@ -143,24 +143,17 @@ impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
         Box::new([TypeId::of::<A>(), TypeId::of::<B>()])
     }
 
-    fn metadata() -> Vec<TypeMetadata> {
-        let mut metadata = vec![];
+    fn metadata() -> ComponentsMetadata {
+        let mut types_metadata = vec![];
+        types_metadata.push(TypeMetadata);
+        types_metadata.push(TypeMetadata);
 
-        // TODO store only once
-        let entity_size = std::mem::size_of::<(A, B)>();
-        let entity_alignment = std::mem::align_of::<(A, B)>();
-        let entity_layout = std::alloc::Layout::new::<(A, B)>();
-        metadata.push(TypeMetadata {
-            entity_size,
-            entity_alignment,
-            entity_layout,
-        });
-        metadata.push(TypeMetadata {
-            entity_size,
-            entity_alignment,
-            entity_layout,
-        });
-        metadata
+        ComponentsMetadata {
+            entity_size: std::mem::size_of::<(A, B)>(),
+            entity_alignment: std::mem::align_of::<(A, B)>(),
+            entity_layout: std::alloc::Layout::new::<(A, B)>(),
+            _types_metadata: types_metadata,
+        }
     }
     fn store_components(&mut self, archetype: &mut Archetype) {
         archetype.store_component(&self.0 as *const A as *const u8, 0usize);
@@ -168,11 +161,15 @@ impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
     }
 }
 
-pub struct TypeMetadata {
+pub struct ComponentsMetadata {
     entity_size: usize,
     entity_alignment: usize,
     entity_layout: std::alloc::Layout,
+    _types_metadata: Vec<TypeMetadata>,
 }
+
+// TODO figure out what to store in there
+pub struct TypeMetadata;
 
 #[cfg(test)]
 mod tests {
@@ -234,7 +231,7 @@ mod tests {
     #[test]
     pub fn archetype_new() {
         let archetype = Archetype::new::<(Position, Velocity)>();
-        assert_eq!(archetype.types_metadata.len(), 2);
+        assert_eq!(archetype.components_metadata._types_metadata.len(), 2);
     }
 
     #[test]
