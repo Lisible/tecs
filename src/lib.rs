@@ -1,4 +1,4 @@
-use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::ptr::NonNull;
@@ -43,7 +43,10 @@ impl Ecs {
 pub struct Archetype {
     components_metadata: ComponentsMetadata,
     data: NonNull<u8>,
+    size: usize,
+    stored_entities: Vec<EntityId>,
     entity_count: usize,
+    types_offset: Vec<usize>,
     capacity: usize,
 }
 
@@ -52,50 +55,92 @@ impl Archetype {
         Self {
             components_metadata: C::metadata(),
             data: NonNull::dangling(),
+            size: 0,
+            stored_entities: vec![],
             entity_count: 0,
+            types_offset: vec![],
             capacity: 0,
         }
     }
 
-    pub fn store_component(&mut self, component_data: *const u8, type_index: usize) {
-        if self.capacity < self.entity_count + 1 {
-            self.grow();
+    pub fn allocate_storage_for_entity(&mut self, entity_id: EntityId) -> usize {
+        if self.size == self.capacity {
+            if self.capacity == 0 {
+                self.grow(1);
+            } else {
+                self.grow(self.capacity * 2);
+            }
         }
 
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                component_data,
-                self.data.as_ptr().offset(self.entity_count as isize),
-                1,
-            )
-        }
-
-        if type_index == 0 {
-            self.entity_count += 1;
-        }
+        self.stored_entities.push(entity_id);
+        self.entity_count += 1;
+        self.stored_entities.len() - 1
     }
 
-    fn grow(&mut self) {
-        unsafe {
-            let _entity_alignment = self.components_metadata.entity_alignment;
-            let _entity_size = self.components_metadata.entity_size;
-            let entity_layout = self.components_metadata.entity_layout;
+    // This code is heavily inspired from hecs archetype grow method
+    // https://github.com/Ralith/hecs/blob/master/src/archetype.rs
+    fn grow(&mut self, new_capacity: usize) {
+        let new_entity_count = self.entity_count + new_capacity;
 
-            // TODO handle realloc
-            let (new_capacity, ptr) = {
-                let ptr = std::alloc::System.alloc(entity_layout);
-                (1, ptr)
-            };
+        // First we resize the stored_entity vec
+        self.stored_entities.resize_with(new_capacity, || 0);
 
-            // TODO handle error
-            self.data = NonNull::new_unchecked(ptr);
-            self.capacity = new_capacity;
+        // Then we compute the required size to store correctly aligned components
+        let mut types_offset = vec![0; self.components_metadata.types_metadata.len()];
+        let mut new_size = 0;
+        for (i, type_metadata) in self.components_metadata.types_metadata.iter().enumerate() {
+            new_size = align(new_size, type_metadata.alignment);
+            types_offset[i] = new_size;
+            new_size += type_metadata.size * new_entity_count;
         }
+
+        // Then we allocate that space
+        let mut new_data: NonNull<u8> = NonNull::dangling();
+        unsafe {
+            if new_capacity > 0 {
+                new_data = NonNull::new(std::alloc::alloc(
+                    Layout::from_size_align(
+                        self.size,
+                        self.components_metadata
+                            .types_metadata
+                            .first()
+                            .map_or(1, |t| t.alignment),
+                    )
+                    .unwrap(),
+                ))
+                .unwrap();
+            }
+        }
+
+        // TODO free reallocated data
+
+        self.data = new_data;
+        self.types_offset = types_offset;
+    }
+
+    pub unsafe fn store_component(
+        &mut self,
+        component_data: *const u8,
+        type_index: usize,
+        data_index: usize,
+        data_size: usize,
+    ) {
+        let destination_ptr = NonNull::new_unchecked(
+            self.data
+                .as_ptr()
+                .add(self.types_offset[type_index] + data_size * data_index)
+                .cast::<u8>(),
+        );
+        std::ptr::copy_nonoverlapping(component_data, destination_ptr.as_ptr(), data_size);
     }
 
     pub fn entity_count(&self) -> usize {
         self.entity_count
     }
+}
+
+fn align(value: usize, alignment: usize) -> usize {
+    (value + alignment - 1) & (!alignment - 1)
 }
 
 pub struct EntityStore {
@@ -135,7 +180,7 @@ impl EntityStore {
 pub trait ComponentsDefinition {
     fn component_types() -> Box<[ComponentType]>;
     fn metadata() -> ComponentsMetadata;
-    fn store_components(&mut self, archetype: &mut Archetype);
+    fn store_components(&mut self, archetype: &mut Archetype, index: usize);
 }
 
 impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
@@ -145,19 +190,37 @@ impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
 
     fn metadata() -> ComponentsMetadata {
         let mut types_metadata = vec![];
-        types_metadata.push(TypeMetadata);
-        types_metadata.push(TypeMetadata);
+        types_metadata.push(TypeMetadata {
+            alignment: std::mem::align_of::<A>(),
+            size: std::mem::size_of::<A>(),
+        });
+        types_metadata.push(TypeMetadata {
+            alignment: std::mem::align_of::<B>(),
+            size: std::mem::size_of::<B>(),
+        });
 
         ComponentsMetadata {
             entity_size: std::mem::size_of::<(A, B)>(),
             entity_alignment: std::mem::align_of::<(A, B)>(),
             entity_layout: std::alloc::Layout::new::<(A, B)>(),
-            _types_metadata: types_metadata,
+            types_metadata: types_metadata,
         }
     }
-    fn store_components(&mut self, archetype: &mut Archetype) {
-        archetype.store_component(&self.0 as *const A as *const u8, 0usize);
-        archetype.store_component(&self.1 as *const B as *const u8, 1usize);
+    fn store_components(&mut self, archetype: &mut Archetype, index: usize) {
+        unsafe {
+            archetype.store_component(
+                &self.0 as *const A as *const u8,
+                0usize,
+                index,
+                std::mem::size_of::<A>(),
+            );
+            archetype.store_component(
+                &self.1 as *const B as *const u8,
+                1usize,
+                index,
+                std::mem::size_of::<B>(),
+            );
+        }
     }
 }
 
@@ -165,11 +228,13 @@ pub struct ComponentsMetadata {
     entity_size: usize,
     entity_alignment: usize,
     entity_layout: std::alloc::Layout,
-    _types_metadata: Vec<TypeMetadata>,
+    types_metadata: Vec<TypeMetadata>,
 }
 
-// TODO figure out what to store in there
-pub struct TypeMetadata;
+pub struct TypeMetadata {
+    alignment: usize,
+    size: usize,
+}
 
 #[cfg(test)]
 mod tests {
@@ -231,14 +296,15 @@ mod tests {
     #[test]
     pub fn archetype_new() {
         let archetype = Archetype::new::<(Position, Velocity)>();
-        assert_eq!(archetype.components_metadata._types_metadata.len(), 2);
+        assert_eq!(archetype.components_metadata.types_metadata.len(), 2);
     }
 
     #[test]
     pub fn archetype_store() {
         let mut archetype = Archetype::new::<(Position, Velocity)>();
+        let index = archetype.allocate_storage_for_entity(1);
         (Position { x: 3f32, y: 5f32 }, Velocity { x: 8f32, y: 6f32 })
-            .store_components(&mut archetype);
+            .store_components(&mut archetype, index);
         assert_eq!(archetype.entity_count(), 1);
     }
 }
