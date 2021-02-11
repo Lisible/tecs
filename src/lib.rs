@@ -100,7 +100,7 @@ impl Archetype {
             if new_capacity > 0 {
                 new_data = NonNull::new(std::alloc::alloc(
                     Layout::from_size_align(
-                        self.size,
+                        new_size,
                         self.components_metadata
                             .types_metadata
                             .first()
@@ -114,6 +114,7 @@ impl Archetype {
 
         // TODO free reallocated data
 
+        self.size = new_size;
         self.data = new_data;
         self.types_offset = types_offset;
     }
