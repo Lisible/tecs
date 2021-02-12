@@ -74,13 +74,13 @@ impl Archetype {
 
         self.stored_entities.push(entity_id);
         self.entity_count += 1;
-        self.stored_entities.len() - 1
+        self.entity_count - 1
     }
 
     // This code is heavily inspired from hecs archetype grow method
     // https://github.com/Ralith/hecs/blob/master/src/archetype.rs
     fn grow(&mut self, new_capacity: usize) {
-        let new_entity_count = self.entity_count + new_capacity;
+        let new_entity_count = new_capacity;
 
         // First we resize the stored_entity vec
         self.stored_entities.resize_with(new_capacity, || 0);
@@ -89,9 +89,9 @@ impl Archetype {
         let mut types_offset = vec![0; self.components_metadata.types_metadata.len()];
         let mut new_size = 0;
         for (i, type_metadata) in self.components_metadata.types_metadata.iter().enumerate() {
-            new_size = align(new_size, type_metadata.alignment);
+            new_size = align(new_size, type_metadata.layout.align());
             types_offset[i] = new_size;
-            new_size += type_metadata.size * new_entity_count;
+            new_size += type_metadata.layout.size() * new_entity_count;
         }
 
         // Then we allocate that space
@@ -104,7 +104,7 @@ impl Archetype {
                         self.components_metadata
                             .types_metadata
                             .first()
-                            .map_or(1, |t| t.alignment),
+                            .map_or(1, |t| t.layout.align()),
                     )
                     .unwrap(),
                 ))
@@ -192,18 +192,13 @@ impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
     fn metadata() -> ComponentsMetadata {
         let mut types_metadata = vec![];
         types_metadata.push(TypeMetadata {
-            alignment: std::mem::align_of::<A>(),
-            size: std::mem::size_of::<A>(),
+            layout: std::alloc::Layout::new::<A>(),
         });
         types_metadata.push(TypeMetadata {
-            alignment: std::mem::align_of::<B>(),
-            size: std::mem::size_of::<B>(),
+            layout: std::alloc::Layout::new::<B>(),
         });
 
         ComponentsMetadata {
-            entity_size: std::mem::size_of::<(A, B)>(),
-            entity_alignment: std::mem::align_of::<(A, B)>(),
-            entity_layout: std::alloc::Layout::new::<(A, B)>(),
             types_metadata: types_metadata,
         }
     }
@@ -226,15 +221,12 @@ impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
 }
 
 pub struct ComponentsMetadata {
-    entity_size: usize,
-    entity_alignment: usize,
-    entity_layout: std::alloc::Layout,
     types_metadata: Vec<TypeMetadata>,
 }
 
+#[derive(Debug)]
 pub struct TypeMetadata {
-    alignment: usize,
-    size: usize,
+    layout: std::alloc::Layout,
 }
 
 #[cfg(test)]
