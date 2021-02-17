@@ -168,6 +168,25 @@ impl Archetype {
     }
 }
 
+impl Drop for Archetype {
+    fn drop(&mut self) {
+        if self.size > 0 {
+            unsafe {
+                std::alloc::dealloc(
+                    self.data.as_ptr(),
+                    Layout::from_size_align_unchecked(
+                        self.size,
+                        self.components_metadata
+                            .types_metadata
+                            .first()
+                            .map_or(1, |t| t.layout.align()),
+                    ),
+                );
+            }
+        }
+    }
+}
+
 fn align(value: usize, alignment: usize) -> usize {
     (value + alignment - 1) & (!alignment - 1)
 }
