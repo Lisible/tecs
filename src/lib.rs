@@ -343,13 +343,11 @@ mod tests {
     pub fn archetype_store() {
         let mut archetype = Archetype::new::<(Position, Velocity)>();
         let index = archetype.allocate_storage_for_entity(1);
-        dbg!(index);
         (Position { x: 3f32, y: 5f32 }, Velocity { x: 8f32, y: 6f32 })
             .store_components(&mut archetype, index);
         assert_eq!(archetype.entity_count(), 1);
 
         let index = archetype.allocate_storage_for_entity(2);
-        dbg!(index);
 
         (
             Position { x: 31f32, y: 8f32 },
