@@ -64,7 +64,7 @@ impl Archetype {
     }
 
     pub fn allocate_storage_for_entity(&mut self, entity_id: EntityId) -> usize {
-        if self.size == self.capacity {
+        if self.entity_count == self.capacity {
             if self.capacity == 0 {
                 self.grow(1);
             } else {
@@ -111,9 +111,37 @@ impl Archetype {
                 .unwrap();
             }
         }
+        if self.size != 0 {
+            // Copy previous data
+            for (i, type_metadata) in self.components_metadata.types_metadata.iter().enumerate() {
+                let component_size = type_metadata.layout.size();
+                let old_type_offset = self.types_offset[i];
+                let type_offset = self.types_offset[i];
 
-        // TODO free reallocated data
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        self.data.as_ptr().add(old_type_offset),
+                        new_data.as_ptr().add(type_offset),
+                        component_size * self.entity_count,
+                    );
+                }
+            }
 
+            // Free allocated memory
+            unsafe {
+                std::alloc::dealloc(
+                    self.data.as_ptr(),
+                    Layout::from_size_align_unchecked(
+                        self.size,
+                        self.components_metadata
+                            .types_metadata
+                            .first()
+                            .map_or(1, |t| t.layout.align()),
+                    ),
+                );
+            }
+        }
+        self.capacity = new_capacity;
         self.size = new_size;
         self.data = new_data;
         self.types_offset = types_offset;
@@ -296,8 +324,19 @@ mod tests {
     pub fn archetype_store() {
         let mut archetype = Archetype::new::<(Position, Velocity)>();
         let index = archetype.allocate_storage_for_entity(1);
+        dbg!(index);
         (Position { x: 3f32, y: 5f32 }, Velocity { x: 8f32, y: 6f32 })
             .store_components(&mut archetype, index);
         assert_eq!(archetype.entity_count(), 1);
+
+        let index = archetype.allocate_storage_for_entity(2);
+        dbg!(index);
+
+        (
+            Position { x: 31f32, y: 8f32 },
+            Velocity { x: 12f32, y: 5f32 },
+        )
+            .store_components(&mut archetype, index);
+        assert_eq!(archetype.entity_count(), 2);
     }
 }
