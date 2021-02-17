@@ -20,9 +20,11 @@ impl Ecs {
         }
     }
 
-    pub fn create_entity<D: ComponentsDefinition>(&mut self, _components_definition: D) {
-        let _entity_id = self.entity_store.allocate_entity();
-        let _archetype = self.get_or_insert_archetype::<D>();
+    pub fn create_entity<D: ComponentsDefinition>(&mut self, components_definition: D) {
+        let entity_id = self.entity_store.allocate_entity();
+        let archetype = self.get_or_insert_archetype::<D>();
+        let data_index = archetype.allocate_storage_for_entity(entity_id);
+        components_definition.store_components(archetype, data_index);
     }
 
     pub fn entity_count(&self) -> usize {
@@ -228,7 +230,7 @@ impl EntityStore {
 pub trait ComponentsDefinition {
     fn component_types() -> Box<[ComponentType]>;
     fn metadata() -> ComponentsMetadata;
-    fn store_components(&mut self, archetype: &mut Archetype, index: usize);
+    fn store_components(&self, archetype: &mut Archetype, index: usize);
 }
 
 impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
@@ -249,7 +251,7 @@ impl<A: 'static, B: 'static> ComponentsDefinition for (A, B) {
             types_metadata: types_metadata,
         }
     }
-    fn store_components(&mut self, archetype: &mut Archetype, index: usize) {
+    fn store_components(&self, archetype: &mut Archetype, index: usize) {
         unsafe {
             archetype.store_component(
                 &self.0 as *const A as *const u8,
@@ -302,6 +304,16 @@ mod tests {
     pub fn ecs_new() {
         let ecs = Ecs::new();
         assert_eq!(ecs.entity_count(), 0);
+    }
+
+    #[test]
+    pub fn ecs_create_entity() {
+        let mut ecs = Ecs::new();
+        assert_eq!(ecs.entity_count(), 0);
+        ecs.create_entity((Position { x: 1.0, y: 1.5 }, Velocity { x: 3.0, y: 0.5 }));
+        assert_eq!(ecs.entity_count(), 1);
+        ecs.create_entity((Position { x: 5.0, y: 8.5 }, Velocity { x: 2.3, y: 1.4 }));
+        assert_eq!(ecs.entity_count(), 2);
     }
 
     #[test]
